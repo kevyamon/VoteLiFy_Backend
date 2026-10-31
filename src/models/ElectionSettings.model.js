@@ -6,7 +6,7 @@ const electionSettingsSchema = new mongoose.Schema(
       type: String,
       required: [true, "Le titre de l'élection est obligatoire."],
       trim: true,
-      default: 'Élection des responsables — Promotion Formation No-Code',
+      default: 'Élection des responsables — Communauté No-Code',
       maxlength: [150, 'Le titre ne peut excéder 150 caractères.'],
     },
     description: {
