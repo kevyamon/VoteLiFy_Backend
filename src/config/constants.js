@@ -1,0 +1,66 @@
+/**
+ * Centralisation des constantes immuables du système VoteLiFy.
+ * Élimine toute valeur magique dispersée dans l'architecture.
+ */
+
+export const ROLES = Object.freeze({
+  ADMIN: 'admin',
+});
+
+export const CANDIDATE_STATUS = Object.freeze({
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+});
+
+export const PIN_STATUS = Object.freeze({
+  ACTIVE: 'active',
+  REVOKED: 'revoked',
+});
+
+export const ELECTION_PERIODS = Object.freeze({
+  CANDIDACIES: 'candidacies',
+  VOTING: 'voting',
+  RESULTS: 'results',
+});
+
+export const AUDIT_ACTIONS = Object.freeze({
+  ADMIN_INITIALIZED: 'ADMIN_INITIALIZED',
+  ADMIN_LOGIN: 'ADMIN_LOGIN',
+  ADMIN_LOGOUT: 'ADMIN_LOGOUT',
+  VOTERS_IMPORTED: 'VOTERS_IMPORTED',
+  CANDIDACY_SUBMITTED: 'CANDIDACY_SUBMITTED',
+  CANDIDACY_APPROVED: 'CANDIDACY_APPROVED',
+  CANDIDACY_REJECTED: 'CANDIDACY_REJECTED',
+  CANDIDACY_UPDATED: 'CANDIDACY_UPDATED',
+  CANDIDACY_DELETED: 'CANDIDACY_DELETED',
+  VOTING_OPENED: 'VOTING_OPENED',
+  VOTING_CLOSED: 'VOTING_CLOSED',
+  CANDIDACIES_OPENED: 'CANDIDACIES_OPENED',
+  CANDIDACIES_CLOSED: 'CANDIDACIES_CLOSED',
+  RESULTS_PUBLISHED: 'RESULTS_PUBLISHED',
+  RESULTS_UNPUBLISHED: 'RESULTS_UNPUBLISHED',
+  TEST_DATA_RESET: 'TEST_DATA_RESET',
+  SETTINGS_UPDATED: 'SETTINGS_UPDATED',
+});
+
+export const SECURITY_CONFIG = Object.freeze({
+  PIN_PREFIX: 'VT',
+  PIN_FORMAT_DESC: 'VT-XXXXX-A (ex: VT-48291-K ou VT-4829-K)',
+  PIN_REGEX: /^VT-\d{4,5}-[A-Z]$/i,
+  BCRYPT_SALT_ROUNDS: 12,
+  COOKIE_NAME: 'vlf_admin_token',
+});
+
+export const HTTP_STATUS = Object.freeze({
+  OK: 200,
+  CREATED: 201,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  UNPROCESSABLE_ENTITY: 422,
+  TOO_MANY_REQUESTS: 429,
+  INTERNAL_SERVER_ERROR: 500,
+});
