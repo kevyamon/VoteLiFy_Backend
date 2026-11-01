@@ -257,8 +257,17 @@ export const calculateTally = async () => {
  * @param {import('express').Request} params.req
  */
 export const resetTestData = async ({ adminPassword, admin, req }) => {
-  // Re-vérification obligatoire du mot de passe administrateur
-  const isMatch = await admin.comparePassword(adminPassword);
+  // Re-vérification obligatoire du mot de passe administrateur en incluant le hash masqué
+  const adminWithPassword = await Admin.findById(admin._id).select('+passwordHash');
+  if (!adminWithPassword) {
+    throw new AppError(
+      'Compte administrateur introuvable.',
+      HTTP_STATUS.UNAUTHORIZED,
+      'ADMIN_NOT_FOUND'
+    );
+  }
+
+  const isMatch = await adminWithPassword.comparePassword(adminPassword);
   if (!isMatch) {
     throw new AppError(
       'Mot de passe administrateur incorrect. La réinitialisation a été refusée.',

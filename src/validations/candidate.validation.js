@@ -31,9 +31,7 @@ export const createCandidateSchema = z.object({
 });
 
 export const moderateCandidateSchema = z.object({
-  status: z.enum([CANDIDATE_STATUS.APPROVED, CANDIDATE_STATUS.REJECTED], {
-    required_error: 'Le statut de modération est obligatoire.',
-  }),
+  status: z.enum([CANDIDATE_STATUS.APPROVED, CANDIDATE_STATUS.REJECTED]).optional().default(CANDIDATE_STATUS.REJECTED),
   reviewNotes: z.string().trim().max(500).optional().default(''),
 });
 
