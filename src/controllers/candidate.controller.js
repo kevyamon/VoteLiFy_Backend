@@ -56,38 +56,7 @@ export const getPublicCandidateById = async (req, res) => {
 export const submitCandidacy = async (req, res) => {
   const { fullName, phone, positionId, photoUrl, pitch, videoUrl, electionId } = req.body;
 
-  // 1. Vérification de l'ouverture de la période de candidature pour ce scrutin
-  let election = null;
-  if (electionId) {
-    election = await Election.findById(electionId);
-  }
-  if (!election) {
-    election = await getElectionSettings();
-  }
-
-  if (!isCandidacyPeriodActive(election)) {
-    return sendError(
-      res,
-      'La période de dépôt des candidatures est actuellement fermée pour ce scrutin.',
-      HTTP_STATUS.BAD_REQUEST,
-      null,
-      'CANDIDACIES_CLOSED'
-    );
-  }
-
-  // 2. Normalisation du numéro WhatsApp
-  const normalizedPhone = normalizePhoneNumber(phone);
-  if (!normalizedPhone) {
-    return sendError(
-      res,
-      'Le numéro WhatsApp fourni est invalide. Veuillez saisir un numéro complet avec indicatif.',
-      HTTP_STATUS.BAD_REQUEST,
-      null,
-      'INVALID_PHONE_NUMBER'
-    );
-  }
-
-  // 3. Vérification de la validité du poste convoité
+  // 1. Vérification de la validité du poste convoité
   const position = await Position.findOne({ _id: positionId, isActive: true });
   if (!position) {
     return sendError(
@@ -99,7 +68,45 @@ export const submitCandidacy = async (req, res) => {
     );
   }
 
-  // 4. Règle d'unicité : un membre ne peut soumettre qu'une seule candidature par élection
+  // 2. Détermination et résolution de l'élection cible
+  const targetElectionId = electionId || position.electionId || null;
+  let election = null;
+
+  if (targetElectionId) {
+    election = await Election.findById(targetElectionId);
+  }
+  if (!election) {
+    // Si aucun identifiant direct, recherche du scrutin actif le plus récent
+    election = await Election.findOne({ isActive: true }).sort({ createdAt: -1 });
+  }
+  if (!election) {
+    election = await getElectionSettings();
+  }
+
+  // 3. Contrôle de l'ouverture de la période de candidature pour ce scrutin
+  if (!isCandidacyPeriodActive(election)) {
+    return sendError(
+      res,
+      'La période de dépôt des candidatures est actuellement fermée pour ce scrutin.',
+      HTTP_STATUS.BAD_REQUEST,
+      null,
+      'CANDIDACIES_CLOSED'
+    );
+  }
+
+  // 4. Normalisation du numéro WhatsApp
+  const normalizedPhone = normalizePhoneNumber(phone);
+  if (!normalizedPhone) {
+    return sendError(
+      res,
+      'Le numéro WhatsApp fourni est invalide. Veuillez saisir un numéro complet avec indicatif.',
+      HTTP_STATUS.BAD_REQUEST,
+      null,
+      'INVALID_PHONE_NUMBER'
+    );
+  }
+
+  // 5. Règle d'unicité : un membre ne peut soumettre qu'une seule candidature par scrutin
   const duplicateQuery = { phone: normalizedPhone };
   if (election?._id) {
     duplicateQuery.electionId = election._id;
@@ -136,7 +143,7 @@ export const submitCandidacy = async (req, res) => {
   const candidate = await Candidate.create({
     fullName: fullName.trim(),
     phone: normalizedPhone,
-    electionId: election?._id || null,
+    electionId: election?._id || targetElectionId || null,
     positionId,
     photoUrl: processedPhotoUrl,
     pitch: pitch.trim(),
@@ -152,7 +159,7 @@ export const submitCandidacy = async (req, res) => {
     metadata: {
       fullName: candidate.fullName,
       positionName: position.name,
-      electionId: election?._id || null,
+      electionId: election?._id || targetElectionId || null,
     },
     req,
   });

@@ -3,7 +3,9 @@ import {
   isVotingPeriodActive,
   isCandidacyPeriodActive,
   assertCanPublishResults,
+  formatElection,
 } from '../services/election.service.js';
+import { Election } from '../models/index.js';
 import { recordAuditLog } from '../services/audit.service.js';
 import { emitSocketEvent } from '../services/socket.service.js';
 import { AUDIT_ACTIONS } from '../config/constants.js';
@@ -14,6 +16,17 @@ import { sendSuccess } from '../utils/apiResponse.js';
  * Ne divulgue aucune donnée interne ni statistique de dépouillement.
  */
 export const getPublicElectionInfo = async (req, res) => {
+  // 1. Privilégier le scrutin actif le plus récent créé sur la plateforme
+  const latestElection = await Election.findOne({ isActive: true }).sort({ createdAt: -1 });
+  if (latestElection) {
+    return sendSuccess(
+      res,
+      formatElection(latestElection),
+      'Informations publiques du scrutin récupérées avec succès.'
+    );
+  }
+
+  // 2. Repli sur le singleton si aucun scrutin spécifique n'est configuré
   const settings = await getElectionSettings();
 
   const isVotingActive = isVotingPeriodActive(settings);
@@ -22,6 +35,7 @@ export const getPublicElectionInfo = async (req, res) => {
   return sendSuccess(
     res,
     {
+      _id: settings._id,
       title: settings.title,
       description: settings.description,
       timezone: settings.timezone,

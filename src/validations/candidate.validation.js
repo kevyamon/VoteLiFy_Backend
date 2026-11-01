@@ -18,6 +18,13 @@ export const createCandidateSchema = z.object({
     .min(8, 'Le numéro de téléphone est trop court.')
     .max(20, 'Le numéro de téléphone est trop long.'),
   positionId: objectIdValidator,
+  electionId: z
+    .string()
+    .optional()
+    .nullable()
+    .refine((val) => !val || mongoose.Types.ObjectId.isValid(val), {
+      message: 'Identifiant ObjectId de scrutin invalide.',
+    }),
   photoUrl: z
     .string({ required_error: 'La photo officielle est obligatoire.' })
     .trim()

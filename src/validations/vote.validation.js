@@ -15,4 +15,11 @@ export const submitVoteSchema = z.object({
     .refine((val) => SECURITY_CONFIG.PIN_REGEX.test(val), {
       message: 'Format de code PIN invalide. Le format attendu est du type VT-00000-A ou VT-0000-A.',
     }),
+  electionId: z
+    .string()
+    .optional()
+    .nullable()
+    .refine((val) => !val || mongoose.Types.ObjectId.isValid(val), {
+      message: 'Identifiant ObjectId de scrutin invalide.',
+    }),
 });
