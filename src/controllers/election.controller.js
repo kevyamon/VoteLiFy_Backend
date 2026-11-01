@@ -5,6 +5,7 @@ import {
   assertCanPublishResults,
 } from '../services/election.service.js';
 import { recordAuditLog } from '../services/audit.service.js';
+import { emitSocketEvent } from '../services/socket.service.js';
 import { AUDIT_ACTIONS } from '../config/constants.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 
@@ -62,6 +63,8 @@ export const updateSettings = async (req, res) => {
     req,
   });
 
+  emitSocketEvent('ELECTION_UPDATED', settings);
+
   return sendSuccess(res, settings, 'Paramètres du scrutin mis à jour avec succès.');
 };
 
@@ -90,6 +93,8 @@ export const openVoting = async (req, res) => {
     metadata: { votingStartAt: settings.votingStartAt, votingEndAt: settings.votingEndAt },
     req,
   });
+
+  emitSocketEvent('ELECTION_UPDATED', settings);
 
   return sendSuccess(
     res,
@@ -121,6 +126,8 @@ export const closeVoting = async (req, res) => {
     req,
   });
 
+  emitSocketEvent('ELECTION_UPDATED', settings);
+
   return sendSuccess(
     res,
     {
@@ -149,6 +156,8 @@ export const openCandidacies = async (req, res) => {
     req,
   });
 
+  emitSocketEvent('ELECTION_UPDATED', settings);
+
   return sendSuccess(
     res,
     {
@@ -176,6 +185,8 @@ export const closeCandidacies = async (req, res) => {
     targetId: String(settings._id),
     req,
   });
+
+  emitSocketEvent('ELECTION_UPDATED', settings);
 
   return sendSuccess(
     res,
@@ -208,6 +219,8 @@ export const publishResults = async (req, res) => {
     req,
   });
 
+  emitSocketEvent('ELECTION_UPDATED', settings);
+
   return sendSuccess(
     res,
     {
@@ -234,6 +247,8 @@ export const unpublishResults = async (req, res) => {
     targetId: String(settings._id),
     req,
   });
+
+  emitSocketEvent('ELECTION_UPDATED', settings);
 
   return sendSuccess(
     res,

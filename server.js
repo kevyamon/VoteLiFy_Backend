@@ -1,17 +1,22 @@
+import http from 'http';
 import app from './src/app.js';
 import { env } from './src/config/env.js';
 import { connectDatabase, disconnectDatabase } from './src/config/database.js';
+import { initSocket } from './src/services/socket.service.js';
 
 let server;
 
 /**
- * Amorçage du serveur HTTP et connexion à la base de données.
+ * Amorçage du serveur HTTP et connexion à la base de données avec WebSockets.
  */
 const startServer = async () => {
   // Connexion préalable à MongoDB
   await connectDatabase();
 
-  server = app.listen(env.PORT, () => {
+  server = http.createServer(app);
+  initSocket(server);
+
+  server.listen(env.PORT, () => {
     console.log(`🚀 Serveur VoteLiFy démarré avec succès.`);
     console.log(`📡 URL locale : http://localhost:${env.PORT}`);
     console.log(`🌍 Mode d'exécution : [${env.NODE_ENV}]`);

@@ -3,6 +3,7 @@ import { previewVoters, importVotersAndGeneratePins } from '../services/voter.se
 import { recordAuditLog } from '../services/audit.service.js';
 import { AUDIT_ACTIONS, HTTP_STATUS } from '../config/constants.js';
 import { env } from '../config/env.js';
+import { emitSocketEvent } from '../services/socket.service.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
 
 /**
@@ -41,6 +42,10 @@ export const importVotersController = async (req, res) => {
       targetType: 'Voter',
       metadata: { importedCount: result.importedCount },
       req,
+    });
+
+    emitSocketEvent('VOTERS_IMPORTED', {
+      importedCount: result.importedCount,
     });
   }
 

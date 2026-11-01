@@ -1,5 +1,6 @@
 import { Position, Candidate } from '../models/index.js';
 import { HTTP_STATUS } from '../config/constants.js';
+import { emitSocketEvent } from '../services/socket.service.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
 
 /**
@@ -26,6 +27,8 @@ export const getAllPositions = async (req, res) => {
 export const createPosition = async (req, res) => {
   const newPosition = await Position.create(req.body);
 
+  emitSocketEvent('POSITIONS_UPDATED', newPosition);
+
   return sendSuccess(
     res,
     newPosition,
@@ -48,6 +51,8 @@ export const updatePosition = async (req, res) => {
   if (!updatedPosition) {
     return sendError(res, 'Poste électoral introuvable.', HTTP_STATUS.NOT_FOUND, null, 'POSITION_NOT_FOUND');
   }
+
+  emitSocketEvent('POSITIONS_UPDATED', updatedPosition);
 
   return sendSuccess(
     res,
@@ -78,6 +83,8 @@ export const deletePosition = async (req, res) => {
   if (!deletedPosition) {
     return sendError(res, 'Poste électoral introuvable.', HTTP_STATUS.NOT_FOUND, null, 'POSITION_NOT_FOUND');
   }
+
+  emitSocketEvent('POSITIONS_UPDATED', { _id: id, deleted: true });
 
   return sendSuccess(res, null, `Le poste « ${deletedPosition.name} » a été supprimé avec succès.`);
 };

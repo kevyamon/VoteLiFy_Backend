@@ -5,6 +5,7 @@ import { isValidVideoUrl, getApprovedCandidatesGroupedByPosition } from '../serv
 import { uploadCandidatePhoto } from '../services/cloudinary.service.js';
 import { recordAuditLog } from '../services/audit.service.js';
 import { CANDIDATE_STATUS, AUDIT_ACTIONS, HTTP_STATUS } from '../config/constants.js';
+import { emitSocketEvent } from '../services/socket.service.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
 
 /**
@@ -142,6 +143,12 @@ export const submitCandidacy = async (req, res) => {
     req,
   });
 
+  emitSocketEvent('CANDIDATE_CREATED', {
+    id: candidate._id,
+    fullName: candidate.fullName,
+    positionId: candidate.positionId,
+  });
+
   return sendSuccess(
     res,
     {
@@ -226,6 +233,8 @@ export const approveCandidate = async (req, res) => {
     req,
   });
 
+  emitSocketEvent('CANDIDATE_UPDATED', candidate);
+
   return sendSuccess(
     res,
     candidate,
@@ -262,6 +271,8 @@ export const rejectCandidate = async (req, res) => {
     },
     req,
   });
+
+  emitSocketEvent('CANDIDATE_UPDATED', candidate);
 
   return sendSuccess(
     res,
@@ -302,6 +313,8 @@ export const updateCandidateAdmin = async (req, res) => {
     req,
   });
 
+  emitSocketEvent('CANDIDATE_UPDATED', updatedCandidate);
+
   return sendSuccess(
     res,
     updatedCandidate,
@@ -340,6 +353,8 @@ export const deleteCandidateAdmin = async (req, res) => {
     metadata: { fullName: candidate.fullName },
     req,
   });
+
+  emitSocketEvent('CANDIDATE_UPDATED', { _id: id, deleted: true });
 
   return sendSuccess(
     res,

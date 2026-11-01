@@ -1,4 +1,5 @@
 import { submitBallot, calculateTally, resetTestData } from '../services/vote.service.js';
+import { emitSocketEvent } from '../services/socket.service.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 
 /**
@@ -10,6 +11,11 @@ export const submitVoteController = async (req, res) => {
   const result = await submitBallot({
     candidateId,
     rawPin: pin,
+  });
+
+  emitSocketEvent('VOTE_CAST', {
+    candidateId,
+    hasVoted: true,
   });
 
   return sendSuccess(res, result, result.message);
@@ -36,5 +42,9 @@ export const resetTestDataAdminController = async (req, res) => {
     req,
   });
 
+  emitSocketEvent('ELECTION_RESET', {});
+  emitSocketEvent('ELECTION_UPDATED', {});
+
   return sendSuccess(res, result, result.message);
 };
+
