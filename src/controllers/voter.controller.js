@@ -11,9 +11,9 @@ import { sendSuccess, sendError } from '../utils/apiResponse.js';
  * Prévisualisation et analyse d'une liste brute de numéros sans modification de la base.
  */
 export const previewVotersController = async (req, res) => {
-  const { rawText } = req.body;
+  const { rawText, electionId } = req.body;
 
-  const preview = await previewVoters(rawText);
+  const preview = await previewVoters(rawText, electionId || null);
 
   return sendSuccess(
     res,
@@ -26,14 +26,23 @@ export const previewVotersController = async (req, res) => {
  * Importation définitive des électeurs et génération de leurs codes PIN individuels.
  */
 export const importVotersController = async (req, res) => {
-  const { rawText } = req.body;
+  const { rawText, electionId } = req.body;
 
-  const settings = await ElectionSettings.getSettings();
+  let electionTitle = 'VoteLiFy';
+  if (electionId) {
+    const { Election } = await import('../models/index.js');
+    const el = await Election.findById(electionId);
+    if (el) electionTitle = el.title;
+  } else {
+    const settings = await ElectionSettings.getSettings();
+    electionTitle = settings.title;
+  }
 
   const result = await importVotersAndGeneratePins({
     rawText,
     clientUrl: env.CLIENT_URL,
-    electionTitle: settings.title,
+    electionTitle,
+    electionId: electionId || null,
   });
 
   if (result.importedCount > 0) {
@@ -79,6 +88,11 @@ export const getVotersController = async (req, res) => {
     filter.hasVoted = req.query.hasVoted === 'true';
   }
 
+  // Filtrage par élection
+  if (req.query.electionId) {
+    filter.electionId = req.query.electionId;
+  }
+
   const [voters, total] = await Promise.all([
     Voter.find(filter)
       .select('phone hasVoted pinStatus votedAt createdAt')
@@ -108,7 +122,12 @@ export const getVotersController = async (req, res) => {
  * Export confidentiel des informations de suivi du scrutin (sans empreintes ni PINs).
  */
 export const exportVotersController = async (req, res) => {
-  const voters = await Voter.find()
+  const exportFilter = {};
+  if (req.query.electionId) {
+    exportFilter.electionId = req.query.electionId;
+  }
+
+  const voters = await Voter.find(exportFilter)
     .select('phone hasVoted pinStatus votedAt createdAt')
     .sort({ createdAt: -1 })
     .lean();

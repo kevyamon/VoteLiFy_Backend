@@ -261,10 +261,24 @@ export const unpublishResults = async (req, res) => {
  * Métriques synthétiques du tableau de bord d'administration (CDC Section 5.3).
  */
 export const getAdminDashboardStats = async (req, res) => {
-  const { Voter, Candidate } = await import('../models/index.js');
+  const { Voter, Candidate, Election } = await import('../models/index.js');
   const { PIN_STATUS, CANDIDATE_STATUS } = await import('../config/constants.js');
 
-  const settings = await getElectionSettings();
+  const electionId = req.query.electionId || null;
+  let targetElection = null;
+  if (electionId) {
+    targetElection = await Election.findById(electionId);
+  }
+  if (!targetElection) {
+    targetElection = await getElectionSettings();
+  }
+
+  const voterFilter = { pinStatus: PIN_STATUS.ACTIVE };
+  const candFilter = {};
+  if (electionId) {
+    voterFilter.electionId = electionId;
+    candFilter.electionId = electionId;
+  }
 
   const [
     totalVoters,
@@ -274,12 +288,12 @@ export const getAdminDashboardStats = async (req, res) => {
     candidatesApproved,
     candidatesRejected,
   ] = await Promise.all([
-    Voter.countDocuments({ pinStatus: PIN_STATUS.ACTIVE }),
-    Voter.countDocuments({ pinStatus: PIN_STATUS.ACTIVE, hasVoted: true }),
-    Candidate.countDocuments(),
-    Candidate.countDocuments({ status: CANDIDATE_STATUS.PENDING }),
-    Candidate.countDocuments({ status: CANDIDATE_STATUS.APPROVED }),
-    Candidate.countDocuments({ status: CANDIDATE_STATUS.REJECTED }),
+    Voter.countDocuments(voterFilter),
+    Voter.countDocuments({ ...voterFilter, hasVoted: true }),
+    Candidate.countDocuments(candFilter),
+    Candidate.countDocuments({ ...candFilter, status: CANDIDATE_STATUS.PENDING }),
+    Candidate.countDocuments({ ...candFilter, status: CANDIDATE_STATUS.APPROVED }),
+    Candidate.countDocuments({ ...candFilter, status: CANDIDATE_STATUS.REJECTED }),
   ]);
 
   const remainingVoters = Math.max(0, totalVoters - votedCount);
@@ -301,9 +315,9 @@ export const getAdminDashboardStats = async (req, res) => {
         rejected: candidatesRejected,
       },
       periods: {
-        votingOpen: isVotingPeriodActive(settings),
-        candidatePeriodOpen: isCandidacyPeriodActive(settings),
-        resultsPublished: settings.resultsPublished,
+        votingOpen: isVotingPeriodActive(targetElection),
+        candidatePeriodOpen: isCandidacyPeriodActive(targetElection),
+        resultsPublished: targetElection.resultsPublished,
       },
       serverTime: new Date().toISOString(),
     },

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { ElectionSettings, Voter, Vote, Candidate, Position } from '../models/index.js';
 import { CANDIDATE_STATUS, PIN_STATUS } from '../config/constants.js';
 
@@ -9,40 +10,66 @@ import { CANDIDATE_STATUS, PIN_STATUS } from '../config/constants.js';
  * 2. Présence obligatoire de tous les candidats approuvés, y compris ceux ayant 0 voix.
  * 3. Exactitude des pourcentages officiels calculés au centième près.
  * 
+ * @param {string|null} [electionId]
  * @returns {Promise<Object>}
  */
-export const getCertifiedPublicResults = async () => {
-  // 1. Statistiques globales officielles de participation
-  const totalVoters = await Voter.countDocuments({ pinStatus: PIN_STATUS.ACTIVE });
-  const totalVotesCast = await Vote.countDocuments();
+export const getCertifiedPublicResults = async (electionId = null) => {
+  // 1. Statistiques globales officielles de participation pour le scrutin
+  const voterFilter = { pinStatus: PIN_STATUS.ACTIVE };
+  if (electionId) voterFilter.electionId = electionId;
+
+  const totalVoters = await Voter.countDocuments(voterFilter);
+  const totalVotesCast = await Vote.countDocuments(electionId ? { electionId } : {});
   const participationRate = totalVoters > 0
     ? Number(((totalVotesCast / totalVoters) * 100).toFixed(2))
     : 0;
 
   // 2. Récupération ordonnée des postes actifs
-  const positions = await Position.find({ isActive: true })
+  const posFilter = { isActive: true };
+  if (electionId) posFilter.electionId = electionId;
+
+  let positions = await Position.find(posFilter)
     .sort({ order: 1, name: 1 })
     .lean();
+
+  if (positions.length === 0 && electionId) {
+    positions = await Position.find({ isActive: true, electionId: null })
+      .sort({ order: 1, name: 1 })
+      .lean();
+  }
 
   const positionIds = positions.map((p) => p._id);
 
   // 3. Récupération des candidats approuvés
-  const candidates = await Candidate.find({
+  const candFilter = {
     status: CANDIDATE_STATUS.APPROVED,
     positionId: { $in: positionIds },
-  })
+  };
+  if (electionId) candFilter.electionId = electionId;
+
+  const candidates = await Candidate.find(candFilter)
     .select('fullName positionId photoUrl')
     .lean();
 
   // 4. Agrégation des suffrages réels
-  const voteAggregations = await Vote.aggregate([
-    {
-      $group: {
-        _id: '$candidateId',
-        votesCount: { $sum: 1 },
+  const pipeline = [];
+  if (electionId) {
+    pipeline.push({
+      $match: {
+        electionId: mongoose.Types.ObjectId.isValid(electionId)
+          ? new mongoose.Types.ObjectId(electionId)
+          : electionId,
       },
+    });
+  }
+  pipeline.push({
+    $group: {
+      _id: '$candidateId',
+      votesCount: { $sum: 1 },
     },
-  ]);
+  });
+
+  const voteAggregations = await Vote.aggregate(pipeline);
 
   const votesMap = new Map();
   voteAggregations.forEach((item) => {

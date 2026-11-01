@@ -63,3 +63,44 @@ export const uploadCandidatePhoto = async (imageBase64OrUrl, candidateName = '')
     throw new Error('Échec du traitement de la photo officielle sur le serveur média.');
   }
 };
+
+/**
+ * Téléverse et optimise l'image d'illustration officielle d'un scrutin électoral.
+ *
+ * @param {string} imageBase64OrUrl - Image encodée en Data URI base64 ou URL publique
+ * @param {string} electionTitle - Titre du scrutin pour le nommage
+ * @returns {Promise<string>} - URL sécurisée (HTTPS) de l'image optimisée
+ */
+export const uploadElectionImage = async (imageBase64OrUrl, electionTitle = '') => {
+  if (!isCloudinaryConfigured) {
+    console.warn("⚠️ Cloudinary n'est pas configuré. Utilisation de l'image brute.");
+    return imageBase64OrUrl;
+  }
+
+  if (typeof imageBase64OrUrl === 'string' && imageBase64OrUrl.includes('cloudinary.com')) {
+    return imageBase64OrUrl;
+  }
+
+  try {
+    const safeTag = electionTitle
+      ? electionTitle.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 30)
+      : 'election';
+
+    const uploadResult = await cloudinary.uploader.upload(imageBase64OrUrl, {
+      folder: 'votelify/elections',
+      public_id: `vlf_election_${Date.now()}_${safeTag}`,
+      overwrite: false,
+      resource_type: 'image',
+      transformation: [
+        { width: 800, height: 600, crop: 'limit' },
+        { quality: 'auto', fetch_format: 'auto' },
+      ],
+    });
+
+    return uploadResult.secure_url;
+  } catch (error) {
+    console.error("❌ Échec du téléversement de l'illustration de l'élection sur Cloudinary :", error);
+    throw new Error("Échec du traitement de l'image d'illustration sur le serveur média.");
+  }
+};
+

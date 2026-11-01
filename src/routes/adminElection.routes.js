@@ -13,6 +13,14 @@ import {
   listAllElectionsController,
   createElectionAdminController,
   updateElectionAdminController,
+  deleteElectionAdminController,
+  openVotingAdminController,
+  closeVotingAdminController,
+  openCandidaciesAdminController,
+  closeCandidaciesAdminController,
+  publishResultsAdminController,
+  unpublishResultsAdminController,
+  uploadElectionImageAdminController,
 } from '../controllers/multiElection.controller.js';
 import {
   getTallyAdminController,
@@ -48,6 +56,16 @@ router.get('/dashboard', asyncHandler(getAdminDashboardStats));
 router.get('/elections', asyncHandler(listAllElectionsController));
 router.post('/elections', validateBody(createElectionSchema), asyncHandler(createElectionAdminController));
 router.patch('/elections/:id', validateBody(updateElectionSettingsSchema), asyncHandler(updateElectionAdminController));
+router.delete('/elections/:id', asyncHandler(deleteElectionAdminController));
+
+// Actions dédiées par élection (ouvertures, fermetures, proclamation, images)
+router.post('/elections/:id/open-voting', asyncHandler(openVotingAdminController));
+router.post('/elections/:id/close-voting', asyncHandler(closeVotingAdminController));
+router.post('/elections/:id/open-candidates', asyncHandler(openCandidaciesAdminController));
+router.post('/elections/:id/close-candidates', asyncHandler(closeCandidaciesAdminController));
+router.post('/elections/:id/publish-results', asyncHandler(publishResultsAdminController));
+router.post('/elections/:id/unpublish-results', asyncHandler(unpublishResultsAdminController));
+router.post('/elections/:id/upload-image', asyncHandler(uploadElectionImageAdminController));
 
 // Pilotage du scrutin et des périodes électorales (scrutin actif)
 router.patch('/election/settings', validateBody(updateElectionSettingsSchema), asyncHandler(updateSettings));

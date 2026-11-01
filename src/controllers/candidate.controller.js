@@ -1,4 +1,4 @@
-import { Candidate, Position, Vote } from '../models/index.js';
+import { Candidate, Position, Vote, Election } from '../models/index.js';
 import { getElectionSettings, isCandidacyPeriodActive } from '../services/election.service.js';
 import { normalizePhoneNumber } from '../services/voter.service.js';
 import { isValidVideoUrl, getApprovedCandidatesGroupedByPosition } from '../services/candidate.service.js';
@@ -12,7 +12,8 @@ import { sendSuccess, sendError } from '../utils/apiResponse.js';
  * Récupération publique des candidats validés, regroupés par poste électoral.
  */
 export const getPublicCandidates = async (req, res) => {
-  const groupedCandidates = await getApprovedCandidatesGroupedByPosition();
+  const electionId = req.query.electionId || null;
+  const groupedCandidates = await getApprovedCandidatesGroupedByPosition(electionId);
 
   return sendSuccess(
     res,
@@ -53,19 +54,26 @@ export const getPublicCandidateById = async (req, res) => {
  * Contrôle la période, normalise le WhatsApp, valide l'unicité et la conformité des médias.
  */
 export const submitCandidacy = async (req, res) => {
-  // 1. Vérification stricte de l'ouverture de la période de candidature
-  const settings = await getElectionSettings();
-  if (!isCandidacyPeriodActive(settings)) {
+  const { fullName, phone, positionId, photoUrl, pitch, videoUrl, electionId } = req.body;
+
+  // 1. Vérification de l'ouverture de la période de candidature pour ce scrutin
+  let election = null;
+  if (electionId) {
+    election = await Election.findById(electionId);
+  }
+  if (!election) {
+    election = await getElectionSettings();
+  }
+
+  if (!isCandidacyPeriodActive(election)) {
     return sendError(
       res,
-      'La période de dépôt des candidatures est actuellement fermée.',
+      'La période de dépôt des candidatures est actuellement fermée pour ce scrutin.',
       HTTP_STATUS.BAD_REQUEST,
       null,
       'CANDIDACIES_CLOSED'
     );
   }
-
-  const { fullName, phone, positionId, photoUrl, pitch, videoUrl } = req.body;
 
   // 2. Normalisation du numéro WhatsApp
   const normalizedPhone = normalizePhoneNumber(phone);
@@ -91,12 +99,16 @@ export const submitCandidacy = async (req, res) => {
     );
   }
 
-  // 4. Règle d'unicité : un membre ne peut soumettre qu'une seule candidature au total
-  const existingCandidate = await Candidate.findOne({ phone: normalizedPhone });
+  // 4. Règle d'unicité : un membre ne peut soumettre qu'une seule candidature par élection
+  const duplicateQuery = { phone: normalizedPhone };
+  if (election?._id) {
+    duplicateQuery.electionId = election._id;
+  }
+  const existingCandidate = await Candidate.findOne(duplicateQuery);
   if (existingCandidate) {
     return sendError(
       res,
-      'Une candidature a déjà été enregistrée avec ce numéro WhatsApp. Il est formellement interdit de postuler à plusieurs postes simultanément.',
+      'Une candidature a déjà été enregistrée avec ce numéro WhatsApp pour ce scrutin. Il est formellement interdit de postuler à plusieurs postes simultanément.',
       HTTP_STATUS.CONFLICT,
       null,
       'CANDIDACY_ALREADY_EXISTS'
@@ -124,6 +136,7 @@ export const submitCandidacy = async (req, res) => {
   const candidate = await Candidate.create({
     fullName: fullName.trim(),
     phone: normalizedPhone,
+    electionId: election?._id || null,
     positionId,
     photoUrl: processedPhotoUrl,
     pitch: pitch.trim(),
@@ -131,7 +144,7 @@ export const submitCandidacy = async (req, res) => {
     status: CANDIDATE_STATUS.PENDING,
   });
 
-  // 7. Traçabilité d'audit
+  // 8. Traçabilité d'audit
   await recordAuditLog({
     action: AUDIT_ACTIONS.CANDIDACY_SUBMITTED,
     targetType: 'Candidate',
@@ -139,6 +152,7 @@ export const submitCandidacy = async (req, res) => {
     metadata: {
       fullName: candidate.fullName,
       positionName: position.name,
+      electionId: election?._id || null,
     },
     req,
   });
@@ -173,6 +187,10 @@ export const getAllCandidatesAdmin = async (req, res) => {
 
   if (req.query.positionId) {
     filter.positionId = req.query.positionId;
+  }
+
+  if (req.query.electionId) {
+    filter.electionId = req.query.electionId;
   }
 
   if (req.query.search) {

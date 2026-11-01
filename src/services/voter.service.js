@@ -61,7 +61,7 @@ export const parseRawPhoneInput = (rawText) => {
  * @param {string} rawText
  * @returns {Promise<Object>} Rapport statistique de validation
  */
-export const previewVoters = async (rawText) => {
+export const previewVoters = async (rawText, electionId = null) => {
   const parsedItems = parseRawPhoneInput(rawText);
 
   const seenInBatch = new Set();
@@ -83,10 +83,13 @@ export const previewVoters = async (rawText) => {
     }
   }
 
-  // Recherche des numéros déjà enregistrés en base de données
-  const existingVoters = await Voter.find({
-    phone: { $in: validBatchNumbers },
-  }).select('phone hasVoted').lean();
+  // Recherche des numéros déjà enregistrés en base de données pour cette élection
+  const query = { phone: { $in: validBatchNumbers } };
+  if (electionId) {
+    query.electionId = electionId;
+  }
+
+  const existingVoters = await Voter.find(query).select('phone hasVoted').lean();
 
   const existingPhoneSet = new Set(existingVoters.map((v) => v.phone));
   const newNumbersToImport = validBatchNumbers.filter((phone) => !existingPhoneSet.has(phone));
@@ -111,14 +114,16 @@ export const previewVoters = async (rawText) => {
  * @param {string} params.rawText
  * @param {string} params.clientUrl
  * @param {string} params.electionTitle
+ * @param {string|null} [params.electionId]
  * @returns {Promise<Object>}
  */
 export const importVotersAndGeneratePins = async ({
   rawText,
   clientUrl,
   electionTitle,
+  electionId = null,
 }) => {
-  const preview = await previewVoters(rawText);
+  const preview = await previewVoters(rawText, electionId);
 
   if (preview.newToImportCount === 0) {
     return {
@@ -145,6 +150,7 @@ export const importVotersAndGeneratePins = async ({
 
     votersToInsert.push({
       phone,
+      electionId: electionId || null,
       pinHash,
       hasVoted: false,
     });

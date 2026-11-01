@@ -23,17 +23,7 @@ import { AppError } from '../middlewares/error.middleware.js';
  * @returns {Promise<Object>}
  */
 export const submitBallot = async ({ candidateId, rawPin }) => {
-  // 1. Contrôle d'ouverture de la période de vote
-  const settings = await ElectionSettings.getSettings();
-  if (!isVotingPeriodActive(settings)) {
-    throw new AppError(
-      'La période de vote est fermée. Il n’est plus possible d’enregistrer de suffrage.',
-      HTTP_STATUS.BAD_REQUEST,
-      'VOTING_CLOSED'
-    );
-  }
-
-  // 2. Vérification de l'éligibilité du candidat
+  // 1. Vérification de l'éligibilité du candidat
   const candidate = await Candidate.findOne({
     _id: candidateId,
     status: CANDIDATE_STATUS.APPROVED,
@@ -47,13 +37,33 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
     );
   }
 
+  // 2. Contrôle d'ouverture de la période de vote pour ce scrutin spécifique
+  let election = null;
+  if (candidate.electionId) {
+    election = await Election.findById(candidate.electionId);
+  }
+  if (!election) {
+    election = await ElectionSettings.getSettings();
+  }
+
+  if (!isVotingPeriodActive(election)) {
+    throw new AppError(
+      'La période de vote est fermée pour ce scrutin. Il n’est plus possible d’enregistrer de suffrage.',
+      HTTP_STATUS.BAD_REQUEST,
+      'VOTING_CLOSED'
+    );
+  }
+
   // 3. Normalisation du PIN
   const normalizedPin = String(rawPin).trim().toUpperCase().replace(/\s+/g, '');
 
-  // 4. Recherche de l'électeur correspondant parmi les électeurs autorisés non encore émargés
-  const potentialVoters = await Voter.find({
-    pinStatus: PIN_STATUS.ACTIVE,
-  }).select('+pinHash');
+  // 4. Recherche de l'électeur correspondant parmi les électeurs autorisés du scrutin
+  const voterQuery = { pinStatus: PIN_STATUS.ACTIVE };
+  if (candidate.electionId) {
+    voterQuery.electionId = candidate.electionId;
+  }
+
+  const potentialVoters = await Voter.find(voterQuery).select('+pinHash');
 
   let matchedVoter = null;
 
@@ -120,6 +130,7 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
       await Vote.create(
         [
           {
+            electionId: candidate.electionId || null,
             positionId: candidate.positionId,
             candidateId: candidate._id,
           },
@@ -129,6 +140,7 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
       await session.commitTransaction();
     } else {
       await Vote.create({
+        electionId: candidate.electionId || null,
         positionId: candidate.positionId,
         candidateId: candidate._id,
       });
@@ -157,31 +169,47 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
  * 
  * @returns {Promise<Object>}
  */
-export const calculateTally = async () => {
+export const calculateTally = async (electionId = null) => {
   // 1. Métriques de participation globale
-  const totalVoters = await Voter.countDocuments({ pinStatus: PIN_STATUS.ACTIVE });
+  const voterFilter = { pinStatus: PIN_STATUS.ACTIVE };
+  if (electionId) voterFilter.electionId = electionId;
+
+  const totalVoters = await Voter.countDocuments(voterFilter);
   const votedCount = await Voter.countDocuments({
-    pinStatus: PIN_STATUS.ACTIVE,
+    ...voterFilter,
     hasVoted: true,
   });
   const remainingCount = Math.max(0, totalVoters - votedCount);
   const participationRate = totalVoters > 0 ? Number(((votedCount / totalVoters) * 100).toFixed(2)) : 0;
 
   // 2. Récupération des postes et candidats approuvés
-  const candidates = await Candidate.find({ status: CANDIDATE_STATUS.APPROVED })
+  const candFilter = { status: CANDIDATE_STATUS.APPROVED };
+  if (electionId) candFilter.electionId = electionId;
+
+  const candidates = await Candidate.find(candFilter)
     .populate('positionId', 'name order')
     .select('fullName positionId photoUrl')
     .lean();
 
   // 3. Agrégation des suffrages exprimés par candidat
-  const voteAggregations = await Vote.aggregate([
-    {
-      $group: {
-        _id: '$candidateId',
-        voteCount: { $sum: 1 },
+  const pipeline = [];
+  if (electionId) {
+    pipeline.push({
+      $match: {
+        electionId: mongoose.Types.ObjectId.isValid(electionId)
+          ? new mongoose.Types.ObjectId(electionId)
+          : electionId,
       },
+    });
+  }
+  pipeline.push({
+    $group: {
+      _id: '$candidateId',
+      voteCount: { $sum: 1 },
     },
-  ]);
+  });
+
+  const voteAggregations = await Vote.aggregate(pipeline);
 
   const voteCountMap = new Map();
   voteAggregations.forEach((item) => {
@@ -257,7 +285,7 @@ export const calculateTally = async () => {
  * @param {import('../models/Admin.model.js').Admin} params.admin - Administrateur connecté
  * @param {import('express').Request} params.req
  */
-export const resetTestData = async ({ adminPassword, admin, req }) => {
+export const resetTestData = async ({ adminPassword, admin, req, electionId = null }) => {
   // Re-vérification obligatoire du mot de passe administrateur en incluant le hash masqué
   const adminWithPassword = await Admin.findById(admin._id).select('+passwordHash');
   if (!adminWithPassword) {
@@ -277,53 +305,77 @@ export const resetTestData = async ({ adminPassword, admin, req }) => {
     );
   }
 
-  // 1. Réinitialisation intégrale des votes
-  await Vote.deleteMany({});
+  if (electionId) {
+    // 1. Réinitialisation des votes du scrutin ciblé
+    await Vote.deleteMany({ electionId });
 
-  // 2. Réinitialisation des statuts d'émargement des électeurs
-  await Voter.updateMany({}, { $set: { hasVoted: false, votedAt: null } });
+    // 2. Réinitialisation des émargements des électeurs de ce scrutin
+    await Voter.updateMany({ electionId }, { $set: { hasVoted: false, votedAt: null } });
 
-  // 3. Remise à zéro intégrale de TOUTES les dates et périodes dans les paramètres (Singleton)
-  const settings = await ElectionSettings.getSettings();
-  settings.candidatePeriodOpen = false;
-  settings.candidateStartAt = null;
-  settings.candidateEndAt = null;
-  settings.votingOpen = false;
-  settings.votingStartAt = null;
-  settings.votingEndAt = null;
-  settings.resultsPublished = false;
-  settings.resultsPublishAt = null;
-  await settings.save();
+    // 3. Remise à zéro des dates et périodes de cette élection
+    await Election.updateOne(
+      { _id: electionId },
+      {
+        $set: {
+          candidatePeriodOpen: false,
+          candidateStartAt: null,
+          candidateEndAt: null,
+          votingOpen: false,
+          votingStartAt: null,
+          votingEndAt: null,
+          resultsPublished: false,
+          resultsPublishAt: null,
+        },
+      }
+    );
+  } else {
+    // 1. Réinitialisation intégrale de tous les votes
+    await Vote.deleteMany({});
 
-  // 4. Remise à zéro intégrale de TOUTES les dates et périodes sur l'ensemble des élections
-  await Election.updateMany(
-    {},
-    {
-      $set: {
-        candidatePeriodOpen: false,
-        candidateStartAt: null,
-        candidateEndAt: null,
-        votingOpen: false,
-        votingStartAt: null,
-        votingEndAt: null,
-        resultsPublished: false,
-        resultsPublishAt: null,
-      },
-    }
-  );
+    // 2. Réinitialisation de tous les statuts d'émargement
+    await Voter.updateMany({}, { $set: { hasVoted: false, votedAt: null } });
+
+    // 3. Remise à zéro intégrale de TOUTES les dates et périodes dans les paramètres
+    const settings = await ElectionSettings.getSettings();
+    settings.candidatePeriodOpen = false;
+    settings.candidateStartAt = null;
+    settings.candidateEndAt = null;
+    settings.votingOpen = false;
+    settings.votingStartAt = null;
+    settings.votingEndAt = null;
+    settings.resultsPublished = false;
+    settings.resultsPublishAt = null;
+    await settings.save();
+
+    // 4. Remise à zéro intégrale de toutes les élections
+    await Election.updateMany(
+      {},
+      {
+        $set: {
+          candidatePeriodOpen: false,
+          candidateStartAt: null,
+          candidateEndAt: null,
+          votingOpen: false,
+          votingStartAt: null,
+          votingEndAt: null,
+          resultsPublished: false,
+          resultsPublishAt: null,
+        },
+      }
+    );
+  }
 
   // 5. Enregistrement obligatoire dans le journal d'audit
   await recordAuditLog({
     adminId: admin._id,
     action: AUDIT_ACTIONS.TEST_DATA_RESET,
     targetType: 'Election',
-    metadata: { confirmedBy: admin.username, clearedDates: true },
+    metadata: { confirmedBy: admin.username, clearedDates: true, electionId },
     req,
   });
 
-
   return {
     success: true,
-    message: 'Les données de test ont été réinitialisées avec succès. Les compteurs de votes sont remis à zéro.',
+    message: 'Les données ont été réinitialisées avec succès. Les compteurs de votes sont remis à zéro.',
   };
 };

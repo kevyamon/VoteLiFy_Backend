@@ -7,9 +7,14 @@ const voterSchema = new mongoose.Schema(
     phone: {
       type: String,
       required: [true, 'Le numéro de téléphone est obligatoire.'],
-      unique: true,
       trim: true,
       index: true,
+    },
+    electionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Election',
+      index: true,
+      default: null,
     },
     pinHash: {
       type: String,
@@ -37,6 +42,10 @@ const voterSchema = new mongoose.Schema(
     versionKey: false,
   }
 );
+
+// Index composite garantissant l'unicité de l'électeur par élection
+voterSchema.index({ phone: 1, electionId: 1 }, { unique: true });
+voterSchema.index({ electionId: 1, pinStatus: 1, hasVoted: 1 });
 
 /**
  * Compare un code PIN brut avec l'empreinte cryptographique stockée.

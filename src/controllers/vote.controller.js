@@ -25,7 +25,7 @@ export const submitVoteController = async (req, res) => {
  * Consultation du dépouillement en direct et des statistiques de participation par l'administrateur.
  */
 export const getTallyAdminController = async (req, res) => {
-  const tally = await calculateTally();
+  const tally = await calculateTally(req.query.electionId || null);
 
   return sendSuccess(res, tally, 'Dépouillement confidentiel calculé avec succès.');
 };
@@ -34,15 +34,16 @@ export const getTallyAdminController = async (req, res) => {
  * Réinitialisation sécurisée des votes de test (Zone dangereuse).
  */
 export const resetTestDataAdminController = async (req, res) => {
-  const { password } = req.body;
+  const { password, electionId } = req.body;
 
   const result = await resetTestData({
     adminPassword: password,
     admin: req.admin,
     req,
+    electionId: electionId || req.query.electionId || null,
   });
 
-  emitSocketEvent('ELECTION_RESET', {});
+  emitSocketEvent('ELECTION_RESET', { electionId: electionId || req.query.electionId || null });
   emitSocketEvent('ELECTION_UPDATED', {});
 
   return sendSuccess(res, result, result.message);

@@ -7,7 +7,15 @@ import { sendSuccess, sendError } from '../utils/apiResponse.js';
  * Récupération de la liste publique des postes électoraux actifs.
  */
 export const getPublicPositions = async (req, res) => {
-  const positions = await Position.find({ isActive: true }).sort({ order: 1, name: 1 }).lean();
+  const filter = { isActive: true };
+  if (req.query.electionId) {
+    filter.electionId = req.query.electionId;
+  }
+
+  let positions = await Position.find(filter).sort({ order: 1, name: 1 }).lean();
+  if (positions.length === 0 && req.query.electionId) {
+    positions = await Position.find({ isActive: true, electionId: null }).sort({ order: 1, name: 1 }).lean();
+  }
 
   return sendSuccess(res, positions, 'Postes électoraux actifs récupérés avec succès.');
 };
@@ -16,7 +24,15 @@ export const getPublicPositions = async (req, res) => {
  * Récupération exhaustive de tous les postes pour le back-office.
  */
 export const getAllPositions = async (req, res) => {
-  const positions = await Position.find().sort({ order: 1, name: 1 }).lean();
+  const filter = {};
+  if (req.query.electionId) {
+    filter.electionId = req.query.electionId;
+  }
+
+  let positions = await Position.find(filter).sort({ order: 1, name: 1 }).lean();
+  if (positions.length === 0 && req.query.electionId) {
+    positions = await Position.find({ electionId: null }).sort({ order: 1, name: 1 }).lean();
+  }
 
   return sendSuccess(res, positions, 'Tous les postes électoraux ont été récupérés.');
 };

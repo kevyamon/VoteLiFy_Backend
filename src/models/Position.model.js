@@ -6,9 +6,14 @@ const positionSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Le libellé du poste est obligatoire.'],
       trim: true,
-      unique: true,
       minlength: [2, 'Le nom du poste doit comporter au moins 2 caractères.'],
       maxlength: [100, 'Le nom du poste ne peut excéder 100 caractères.'],
+    },
+    electionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Election',
+      index: true,
+      default: null,
     },
     description: {
       type: String,
@@ -33,6 +38,7 @@ const positionSchema = new mongoose.Schema(
   }
 );
 
-positionSchema.index({ isActive: 1, order: 1 });
+positionSchema.index({ name: 1, electionId: 1 }, { unique: true });
+positionSchema.index({ electionId: 1, isActive: 1, order: 1 });
 
 export const Position = mongoose.model('Position', positionSchema);

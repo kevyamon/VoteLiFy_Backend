@@ -9,6 +9,12 @@ import mongoose from 'mongoose';
  */
 const voteSchema = new mongoose.Schema(
   {
+    electionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Election',
+      index: true,
+      default: null,
+    },
     positionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Position',
@@ -28,7 +34,8 @@ const voteSchema = new mongoose.Schema(
   }
 );
 
-// Index composite accélérant le dépouillement en direct et le calcul des résultats
+// Index composite accélérant le dépouillement en direct et le calcul des résultats par élection
+voteSchema.index({ electionId: 1, positionId: 1, candidateId: 1 });
 voteSchema.index({ positionId: 1, candidateId: 1 });
 
 export const Vote = mongoose.model('Vote', voteSchema);

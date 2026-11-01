@@ -1,4 +1,5 @@
-import { ElectionSettings, Election } from '../models/index.js';
+import { ElectionSettings, Election, Vote } from '../models/index.js';
+import { uploadElectionImage } from './cloudinary.service.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { HTTP_STATUS } from '../config/constants.js';
 
@@ -101,6 +102,7 @@ export const formatElection = (election) => {
     _id: election._id,
     title: election.title,
     description: election.description || '',
+    imageUrl: election.imageUrl || '',
     initials,
     statusKey,
     statusLabel,
@@ -128,7 +130,6 @@ export const formatElection = (election) => {
  * Récupère l'ensemble des élections disponibles pour affichage sur la page des élections.
  */
 export const getAllElections = async () => {
-  await Election.ensureDefaultElection();
   const elections = await Election.find({ isActive: true }).sort({ createdAt: -1 });
   return elections.map(formatElection);
 };
@@ -145,45 +146,176 @@ export const getElectionById = async (id) => {
 };
 
 /**
- * Création d'une nouvelle élection par l'administrateur.
+ * Création d'une nouvelle élection par l'administrateur avec protection anti-doublon.
  */
 export const createNewElection = async (data, adminId) => {
+  const cleanTitle = (data.title || '').trim();
+
+  // Protection anti-doublon stricte : empêche la création en double si cliqué deux fois
+  const recentDuplicate = await Election.findOne({
+    title: cleanTitle,
+    isActive: true,
+    createdAt: { $gte: new Date(Date.now() - 15 * 1000) },
+  });
+
+  if (recentDuplicate) {
+    return formatElection(recentDuplicate);
+  }
+
+  let processedImageUrl = (data.imageUrl || '').trim();
+  if (processedImageUrl && (processedImageUrl.startsWith('data:image/') || !processedImageUrl.includes('cloudinary.com'))) {
+    processedImageUrl = await uploadElectionImage(processedImageUrl, cleanTitle);
+  }
+
   const election = await Election.create({
     ...data,
+    title: cleanTitle,
+    imageUrl: processedImageUrl,
     createdBy: adminId,
-    // Si des dates de vote sont fournies, déduire l'état d'ouverture
     votingOpen: Boolean(data.votingOpen),
     candidatePeriodOpen: Boolean(data.candidatePeriodOpen),
   });
+
   return formatElection(election);
 };
 
 /**
- * Mise à jour d'une élection existante.
+ * Mise à jour d'une élection existante (titre, dates, description, image).
  */
 export const updateElection = async (id, data) => {
   const election = await Election.findById(id);
-  if (!election) {
+  if (!election || !election.isActive) {
     throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
+  }
+
+  if (data.imageUrl && (data.imageUrl.startsWith('data:image/') || !data.imageUrl.includes('cloudinary.com'))) {
+    data.imageUrl = await uploadElectionImage(data.imageUrl, data.title || election.title);
   }
 
   Object.assign(election, data);
   await election.save();
 
-  // Si c'est la seule élection ou par défaut, maintenir le Singleton synchrone
-  const settings = await ElectionSettings.getSettings();
-  if (data.title) settings.title = data.title;
-  if (data.description !== undefined) settings.description = data.description;
-  if (data.votingStartAt !== undefined) settings.votingStartAt = data.votingStartAt;
-  if (data.votingEndAt !== undefined) settings.votingEndAt = data.votingEndAt;
-  if (data.votingOpen !== undefined) settings.votingOpen = data.votingOpen;
-  if (data.candidateStartAt !== undefined) settings.candidateStartAt = data.candidateStartAt;
-  if (data.candidateEndAt !== undefined) settings.candidateEndAt = data.candidateEndAt;
-  if (data.candidatePeriodOpen !== undefined) settings.candidatePeriodOpen = data.candidatePeriodOpen;
-  if (data.resultsPublished !== undefined) settings.resultsPublished = data.resultsPublished;
-  if (data.resultsPublishAt !== undefined) settings.resultsPublishAt = data.resultsPublishAt;
-  await settings.save();
-
   return formatElection(election);
+};
+
+/**
+ * Ouverture officielle de la période de vote pour un scrutin spécifique.
+ */
+export const openElectionVoting = async (id) => {
+  const election = await Election.findById(id);
+  if (!election || !election.isActive) {
+    throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
+  }
+
+  election.votingOpen = true;
+  election.votingStartAt = new Date();
+  if (!election.votingEndAt || new Date(election.votingEndAt) <= election.votingStartAt) {
+    election.votingEndAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+  }
+  await election.save();
+  return formatElection(election);
+};
+
+/**
+ * Clôture officielle de la période de vote pour un scrutin spécifique.
+ */
+export const closeElectionVoting = async (id) => {
+  const election = await Election.findById(id);
+  if (!election || !election.isActive) {
+    throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
+  }
+
+  election.votingOpen = false;
+  election.votingEndAt = new Date();
+  await election.save();
+  return formatElection(election);
+};
+
+/**
+ * Ouverture du dépôt des candidatures pour un scrutin spécifique.
+ */
+export const openElectionCandidacies = async (id) => {
+  const election = await Election.findById(id);
+  if (!election || !election.isActive) {
+    throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
+  }
+
+  election.candidatePeriodOpen = true;
+  election.candidateStartAt = new Date();
+  await election.save();
+  return formatElection(election);
+};
+
+/**
+ * Fermeture du dépôt des candidatures pour un scrutin spécifique.
+ */
+export const closeElectionCandidacies = async (id) => {
+  const election = await Election.findById(id);
+  if (!election || !election.isActive) {
+    throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
+  }
+
+  election.candidatePeriodOpen = false;
+  election.candidateEndAt = new Date();
+  await election.save();
+  return formatElection(election);
+};
+
+/**
+ * Publication officielle des résultats pour un scrutin spécifique.
+ */
+export const publishElectionResults = async (id) => {
+  const election = await Election.findById(id);
+  if (!election || !election.isActive) {
+    throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
+  }
+
+  assertCanPublishResults(election);
+
+  election.resultsPublished = true;
+  election.resultsPublishAt = new Date();
+  await election.save();
+  return formatElection(election);
+};
+
+/**
+ * Suspension de la publication des résultats pour un scrutin spécifique.
+ */
+export const unpublishElectionResults = async (id) => {
+  const election = await Election.findById(id);
+  if (!election || !election.isActive) {
+    throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
+  }
+
+  election.resultsPublished = false;
+  await election.save();
+  return formatElection(election);
+};
+
+/**
+ * Suppression sécurisée d'une élection.
+ * RÈGLE MÉTIER STRICTE : Impossible de supprimer une élection en cours lorsque des votes ont déjà été enregistrés.
+ */
+export const deleteElection = async (id) => {
+  const election = await Election.findById(id);
+  if (!election || !election.isActive) {
+    throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
+  }
+
+  const votesCount = await Vote.countDocuments({ electionId: election._id });
+  const isVotingActive = isVotingPeriodActive(election);
+
+  if (votesCount > 0 && isVotingActive) {
+    throw new AppError(
+      'Impossible de supprimer une élection en cours lorsque des suffrages ont déjà été enregistrés. Clôturez d’abord le scrutin ou réinitialisez les votes.',
+      HTTP_STATUS.BAD_REQUEST,
+      'CANNOT_DELETE_ACTIVE_ELECTION_WITH_VOTES'
+    );
+  }
+
+  election.isActive = false;
+  await election.save();
+
+  return { id: election._id, title: election.title, deleted: true };
 };
 

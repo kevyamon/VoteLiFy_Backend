@@ -50,6 +50,11 @@ const electionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -82,20 +87,5 @@ electionSchema.virtual('initials').get(function () {
   const clean = this.title.replace(/[^a-zA-ZÀ-ÿ0-9]/g, '');
   return clean.slice(0, 2).toUpperCase() || 'EL';
 });
-
-/**
- * Assure la présence d'au moins une élection par défaut si la base est vierge.
- */
-electionSchema.statics.ensureDefaultElection = async function () {
-  let defaultElection = await this.findOne({ isActive: true }).sort({ createdAt: 1 });
-  if (!defaultElection) {
-    defaultElection = await this.create({
-      title: 'Élection des responsables — Communauté No-Code',
-      description: 'Scrutin officiel et confidentiel de la communauté FORMATION NO-CODE.',
-      timezone: 'Africa/Abidjan',
-    });
-  }
-  return defaultElection;
-};
 
 export const Election = mongoose.model('Election', electionSchema);

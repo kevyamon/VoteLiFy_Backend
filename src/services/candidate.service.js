@@ -29,22 +29,41 @@ export const isValidVideoUrl = (url) => {
 
 /**
  * Récupère tous les candidats officiellement approuvés, regroupés et ordonnés par poste.
+ * Supporte le filtrage strict par élection (multi-élections).
  * 
+ * @param {string|null} [electionId]
  * @returns {Promise<Array>}
  */
-export const getApprovedCandidatesGroupedByPosition = async () => {
+export const getApprovedCandidatesGroupedByPosition = async (electionId = null) => {
+  const posFilter = { isActive: true };
+  if (electionId) {
+    posFilter.electionId = electionId;
+  }
+
   // 1. Récupération des postes actifs
-  const positions = await Position.find({ isActive: true })
+  let positions = await Position.find(posFilter)
     .sort({ order: 1, name: 1 })
     .lean();
 
+  // Si des postes spécifiques n'existent pas encore pour cette élection, repli sur les postes globaux
+  if (positions.length === 0 && electionId) {
+    positions = await Position.find({ isActive: true, electionId: null })
+      .sort({ order: 1, name: 1 })
+      .lean();
+  }
+
   const positionIds = positions.map((p) => p._id);
 
-  // 2. Récupération des candidats approuvés rattachés à ces postes
-  const candidates = await Candidate.find({
+  const candFilter = {
     status: CANDIDATE_STATUS.APPROVED,
     positionId: { $in: positionIds },
-  })
+  };
+  if (electionId) {
+    candFilter.electionId = electionId;
+  }
+
+  // 2. Récupération des candidats approuvés rattachés à ces postes
+  const candidates = await Candidate.find(candFilter)
     .select('fullName positionId photoUrl pitch videoUrl createdAt')
     .sort({ fullName: 1 })
     .lean();
@@ -57,3 +76,4 @@ export const getApprovedCandidatesGroupedByPosition = async () => {
     ),
   }));
 };
+

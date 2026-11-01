@@ -14,8 +14,13 @@ const candidateSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Le numéro WhatsApp du candidat est obligatoire.'],
       trim: true,
-      unique: true, // Empêche formellement un candidat de soumettre plusieurs dossiers
       index: true,
+    },
+    electionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Election',
+      index: true,
+      default: null,
     },
     positionId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -66,7 +71,10 @@ const candidateSchema = new mongoose.Schema(
   }
 );
 
-// Index composite optimisant l'affichage public des candidats validés par poste
-candidateSchema.index({ status: 1, positionId: 1 });
+// Index composite garantissant qu'un candidat ne candidate qu'une fois par élection
+candidateSchema.index({ phone: 1, electionId: 1 }, { unique: true });
+
+// Index composite optimisant l'affichage public des candidats validés par scrutin et par poste
+candidateSchema.index({ electionId: 1, status: 1, positionId: 1 });
 
 export const Candidate = mongoose.model('Candidate', candidateSchema);

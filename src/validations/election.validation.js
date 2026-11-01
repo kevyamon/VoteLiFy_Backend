@@ -11,6 +11,7 @@ export const updateElectionSettingsSchema = z.object({
   votingEndAt: z.coerce.date().nullable().optional(),
   resultsPublished: z.boolean().optional(),
   resultsPublishAt: z.coerce.date().nullable().optional(),
+  imageUrl: z.string().trim().optional().default(''),
   timezone: z.string().trim().min(2).optional(),
 });
 
@@ -21,6 +22,7 @@ export const createElectionSchema = z.object({
     .min(3, "Le nom de l'élection doit comporter au moins 3 caractères.")
     .max(150, "Le nom ne peut excéder 150 caractères."),
   description: z.string().trim().max(1000).optional().default(''),
+  imageUrl: z.string().trim().optional().default(''),
   votingStartAt: z.coerce.date().nullable().optional(),
   votingEndAt: z.coerce.date().nullable().optional(),
   candidateStartAt: z.coerce.date().nullable().optional(),
