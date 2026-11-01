@@ -12,16 +12,21 @@ export const corsMiddleware = cors({
     // Autoriser les requêtes sans origine (ex: curl, applications mobiles ou requêtes serveur à serveur)
     if (!origin) return callback(null, true);
 
-    const allowedOrigins = [env.CLIENT_URL];
-    // En développement local, autoriser aussi localhost sous différents ports
+    const clientUrlClean = (env.CLIENT_URL || '').replace(/\/+$/, '');
+
+    // Autoriser CLIENT_URL configuré, domaines Vercel officiels ou localhost en dev
+    if (
+      origin === clientUrlClean ||
+      origin.endsWith('.vercel.app') ||
+      origin === 'https://votelify.vercel.app'
+    ) {
+      return callback(null, true);
+    }
+
     if (env.NODE_ENV === 'development') {
       if (/^http:\/\/localhost:\d+$/.test(origin) || /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) {
         return callback(null, true);
       }
-    }
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
     }
 
     return callback(new Error(`Origine ${origin} non autorisée par la politique CORS.`));

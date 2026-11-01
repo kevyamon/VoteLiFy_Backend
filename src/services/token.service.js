@@ -32,11 +32,12 @@ export const verifyAdminToken = (token) => {
  */
 export const setAdminAuthCookie = (res, token) => {
   const maxAgeMs = env.ADMIN_SESSION_HOURS * 60 * 60 * 1000;
+  const isProd = env.NODE_ENV === 'production';
 
   res.cookie(SECURITY_CONFIG.COOKIE_NAME, token, {
     httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     maxAge: maxAgeMs,
     path: '/',
   });
@@ -48,10 +49,12 @@ export const setAdminAuthCookie = (res, token) => {
  * @param {import('express').Response} res
  */
 export const clearAdminAuthCookie = (res) => {
+  const isProd = env.NODE_ENV === 'production';
+
   res.clearCookie(SECURITY_CONFIG.COOKIE_NAME, {
     httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     path: '/',
   });
 };

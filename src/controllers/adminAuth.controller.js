@@ -63,6 +63,7 @@ export const registerInitialAdmin = async (req, res) => {
       id: newAdmin._id,
       username: newAdmin.username,
       role: newAdmin.role,
+      token,
     },
     'Compte administrateur initial créé et authentifié avec succès.',
     HTTP_STATUS.CREATED
@@ -121,6 +122,7 @@ export const loginAdmin = async (req, res) => {
       username: admin.username,
       role: admin.role,
       lastLoginAt: admin.lastLoginAt,
+      token,
     },
     'Connexion réussie à l’espace Commission Électorale.'
   );
