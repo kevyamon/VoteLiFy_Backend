@@ -16,6 +16,9 @@ const envSchema = z.object({
   AD_PW: z.string().min(8, "La variable AD_PW d'initialisation administrateur doit comporter au moins 8 caractères."),
   CLIENT_URL: z.string().url('La variable CLIENT_URL doit être une URL valide.').default('http://localhost:5173'),
   ADMIN_SESSION_HOURS: z.coerce.number().default(12),
+  CLOUDINARY_CLOUD_NAME: z.string().optional().default(() => process.env.CLOUDINARY_NAME || process.env.CLOUD_NAME || ''),
+  CLOUDINARY_API_KEY: z.string().optional().default(() => process.env.CLOUDINARY_KEY || process.env.API_KEY || ''),
+  CLOUDINARY_API_SECRET: z.string().optional().default(() => process.env.CLOUDINARY_SECRET || process.env.API_SECRET || ''),
 });
 
 const parseEnv = () => {

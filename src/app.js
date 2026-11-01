@@ -31,9 +31,9 @@ if (env.NODE_ENV !== 'test') {
   app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 }
 
-// 3. Décodage des charges utiles HTTP et des cookies
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+// 3. Décodage des charges utiles HTTP et des cookies (support des photos haute résolution)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
 // 4. Limiteur global de requêtes

@@ -2,6 +2,7 @@ import { Candidate, Position, Vote } from '../models/index.js';
 import { getElectionSettings, isCandidacyPeriodActive } from '../services/election.service.js';
 import { normalizePhoneNumber } from '../services/voter.service.js';
 import { isValidVideoUrl, getApprovedCandidatesGroupedByPosition } from '../services/candidate.service.js';
+import { uploadCandidatePhoto } from '../services/cloudinary.service.js';
 import { recordAuditLog } from '../services/audit.service.js';
 import { CANDIDATE_STATUS, AUDIT_ACTIONS, HTTP_STATUS } from '../config/constants.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
@@ -112,12 +113,18 @@ export const submitCandidacy = async (req, res) => {
     );
   }
 
-  // 6. Enregistrement en base de données avec statut PENDING
+  // 6. Téléversement et optimisation Cloudinary de la photo officielle
+  let processedPhotoUrl = photoUrl.trim();
+  if (photoUrl && (photoUrl.startsWith('data:image/') || !photoUrl.includes('cloudinary.com'))) {
+    processedPhotoUrl = await uploadCandidatePhoto(photoUrl, fullName.trim());
+  }
+
+  // 7. Enregistrement en base de données avec statut PENDING
   const candidate = await Candidate.create({
     fullName: fullName.trim(),
     phone: normalizedPhone,
     positionId,
-    photoUrl: photoUrl.trim(),
+    photoUrl: processedPhotoUrl,
     pitch: pitch.trim(),
     videoUrl: videoUrl ? videoUrl.trim() : '',
     status: CANDIDATE_STATUS.PENDING,
@@ -271,6 +278,10 @@ export const updateCandidateAdmin = async (req, res) => {
 
   if (req.body.phone) {
     req.body.phone = normalizePhoneNumber(req.body.phone) || req.body.phone;
+  }
+
+  if (req.body.photoUrl && req.body.photoUrl.startsWith('data:image/')) {
+    req.body.photoUrl = await uploadCandidatePhoto(req.body.photoUrl, req.body.fullName || '');
   }
 
   const updatedCandidate = await Candidate.findByIdAndUpdate(id, req.body, {
