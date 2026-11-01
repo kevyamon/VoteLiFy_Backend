@@ -7,6 +7,11 @@ import { recordAuditLog } from '../services/audit.service.js';
 import { CANDIDATE_STATUS, AUDIT_ACTIONS, HTTP_STATUS } from '../config/constants.js';
 import { emitSocketEvent } from '../services/socket.service.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
+import {
+  sendCandidacySubmittedEmail,
+  sendCandidacyApprovedEmail,
+  sendCandidacyRejectedEmail,
+} from '../services/email.service.js';
 
 /**
  * Récupération publique des candidats validés, regroupés par poste électoral.
@@ -54,7 +59,7 @@ export const getPublicCandidateById = async (req, res) => {
  * Contrôle la période, normalise le WhatsApp, valide l'unicité et la conformité des médias.
  */
 export const submitCandidacy = async (req, res) => {
-  const { fullName, phone, positionId, photoUrl, pitch, videoUrl, electionId } = req.body;
+  const { fullName, phone, email, positionId, photoUrl, pitch, videoUrl, electionId } = req.body;
 
   // 1. Vérification de la validité du poste convoité
   const position = await Position.findOne({ _id: positionId, isActive: true });
@@ -143,6 +148,7 @@ export const submitCandidacy = async (req, res) => {
   const candidate = await Candidate.create({
     fullName: fullName.trim(),
     phone: normalizedPhone,
+    email: email ? email.trim().toLowerCase() : '',
     electionId: election?._id || targetElectionId || null,
     positionId,
     photoUrl: processedPhotoUrl,
@@ -168,6 +174,15 @@ export const submitCandidacy = async (req, res) => {
     id: candidate._id,
     fullName: candidate.fullName,
     positionId: candidate.positionId,
+  });
+
+  // 9. Envoi d'accusé de réception automatique par email (Brevo)
+  sendCandidacySubmittedEmail({
+    candidate,
+    electionTitle: election?.title || 'Scrutin officiel',
+    positionName: position.name,
+  }).catch((emailErr) => {
+    console.error('[EmailService] Erreur lors de l’envoi de l’accusé de réception :', emailErr.message);
   });
 
   return sendSuccess(
@@ -260,6 +275,29 @@ export const approveCandidate = async (req, res) => {
 
   emitSocketEvent('CANDIDATE_UPDATED', candidate);
 
+  // Notification par email de la validation officielle de candidature (Brevo)
+  (async () => {
+    try {
+      let electionTitle = 'Scrutin officiel';
+      if (candidate.electionId) {
+        const el = await Election.findById(candidate.electionId);
+        if (el) electionTitle = el.title;
+      } else {
+        const settings = await getElectionSettings();
+        if (settings) electionTitle = settings.title;
+      }
+
+      const position = await Position.findById(candidate.positionId);
+      await sendCandidacyApprovedEmail({
+        candidate,
+        electionTitle,
+        positionName: position?.name || 'Poste électoral',
+      });
+    } catch (emailErr) {
+      console.error('[EmailService] Erreur notification approbation candidature :', emailErr.message);
+    }
+  })();
+
   return sendSuccess(
     res,
     candidate,
@@ -298,6 +336,30 @@ export const rejectCandidate = async (req, res) => {
   });
 
   emitSocketEvent('CANDIDATE_UPDATED', candidate);
+
+  // Notification par email du rejet de la candidature avec observation (Brevo)
+  (async () => {
+    try {
+      let electionTitle = 'Scrutin officiel';
+      if (candidate.electionId) {
+        const el = await Election.findById(candidate.electionId);
+        if (el) electionTitle = el.title;
+      } else {
+        const settings = await getElectionSettings();
+        if (settings) electionTitle = settings.title;
+      }
+
+      const position = await Position.findById(candidate.positionId);
+      await sendCandidacyRejectedEmail({
+        candidate,
+        electionTitle,
+        positionName: position?.name || 'Poste électoral',
+        reason: candidate.reviewNotes,
+      });
+    } catch (emailErr) {
+      console.error('[EmailService] Erreur notification rejet candidature :', emailErr.message);
+    }
+  })();
 
   return sendSuccess(
     res,

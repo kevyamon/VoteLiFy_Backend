@@ -19,6 +19,9 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().optional().default(() => process.env.CLOUDINARY_NAME || process.env.CLOUD_NAME || ''),
   CLOUDINARY_API_KEY: z.string().optional().default(() => process.env.CLOUDINARY_KEY || process.env.API_KEY || ''),
   CLOUDINARY_API_SECRET: z.string().optional().default(() => process.env.CLOUDINARY_SECRET || process.env.API_SECRET || ''),
+  BREVO_API_KEY: z.string().optional().default(() => process.env.BREVO_API_KEY || ''),
+  BREVO_SENDER_EMAIL: z.string().optional().default(() => process.env.BREVO_SENDER_EMAIL || ''),
+  BREVO_SENDER_NAME: z.string().optional().default(() => process.env.BREVO_SENDER_NAME || 'VoteLiFy'),
 });
 
 const parseEnv = () => {

@@ -17,6 +17,12 @@ export const createCandidateSchema = z.object({
     .trim()
     .min(8, 'Le numéro de téléphone est trop court.')
     .max(20, 'Le numéro de téléphone est trop long.'),
+  email: z
+    .string({ required_error: "L'adresse email est obligatoire." })
+    .trim()
+    .email("L'adresse email fournie est invalide.")
+    .max(150, "L'adresse email ne peut excéder 150 caractères.")
+    .toLowerCase(),
   positionId: objectIdValidator,
   electionId: z
     .string()

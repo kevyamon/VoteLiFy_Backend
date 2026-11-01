@@ -16,6 +16,13 @@ const candidateSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: '',
+      index: true,
+    },
     electionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Election',
