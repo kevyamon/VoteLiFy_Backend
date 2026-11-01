@@ -1,7 +1,8 @@
 import { Voter, ElectionSettings } from '../models/index.js';
 import { previewVoters, importVotersAndGeneratePins } from '../services/voter.service.js';
+import { generateSinglePin, hashPin, formatWhatsAppMessage } from '../services/pin.service.js';
 import { recordAuditLog } from '../services/audit.service.js';
-import { AUDIT_ACTIONS, HTTP_STATUS } from '../config/constants.js';
+import { AUDIT_ACTIONS, PIN_STATUS, HTTP_STATUS } from '../config/constants.js';
 import { env } from '../config/env.js';
 import { emitSocketEvent } from '../services/socket.service.js';
 import { sendSuccess, sendError } from '../utils/apiResponse.js';
@@ -121,3 +122,101 @@ export const exportVotersController = async (req, res) => {
 
   return sendSuccess(res, exportData, 'Données d’export confidentiel prêtes.');
 };
+
+/**
+ * Suppression sécurisée d'un électeur de la liste (registre d'émargement).
+ * Strictement interdite si l'électeur a déjà émargé et voté.
+ */
+export const deleteVoterController = async (req, res) => {
+  const { id } = req.params;
+
+  const voter = await Voter.findById(id);
+  if (!voter) {
+    return sendError(res, 'Électeur introuvable.', HTTP_STATUS.NOT_FOUND, null, 'VOTER_NOT_FOUND');
+  }
+
+  if (voter.hasVoted) {
+    return sendError(
+      res,
+      'Action impossible : cet électeur a déjà exprimé son vote. Son émargement est scellé pour garantir la concordance des suffrages.',
+      HTTP_STATUS.BAD_REQUEST,
+      null,
+      'VOTER_ALREADY_VOTED'
+    );
+  }
+
+  await Voter.findByIdAndDelete(id);
+
+  await recordAuditLog({
+    adminId: req.admin._id,
+    action: AUDIT_ACTIONS.VOTER_DELETED,
+    targetType: 'Voter',
+    targetId: id,
+    metadata: { phone: voter.phone },
+    req,
+  });
+
+  emitSocketEvent('VOTE_CAST', { voterDeleted: true });
+
+  return sendSuccess(res, null, `L'électeur ${voter.phone} a été retiré de la liste avec succès.`);
+};
+
+/**
+ * Régénération d'un nouveau code PIN individuel pour un électeur.
+ * Interdite si le vote a déjà été exprimé.
+ */
+export const regenerateVoterPinController = async (req, res) => {
+  const { id } = req.params;
+
+  const voter = await Voter.findById(id);
+  if (!voter) {
+    return sendError(res, 'Électeur introuvable.', HTTP_STATUS.NOT_FOUND, null, 'VOTER_NOT_FOUND');
+  }
+
+  if (voter.hasVoted) {
+    return sendError(
+      res,
+      'Action impossible : cet électeur a déjà voté. Aucun nouveau code PIN ne peut être émis.',
+      HTTP_STATUS.BAD_REQUEST,
+      null,
+      'VOTER_ALREADY_VOTED'
+    );
+  }
+
+  // Génération d'un nouveau code PIN sécurisé (ex: VT-48291-K)
+  const newPin = generateSinglePin();
+  const newPinHash = await hashPin(newPin);
+
+  voter.pinHash = newPinHash;
+  voter.pinStatus = PIN_STATUS.ACTIVE;
+  await voter.save();
+
+  const settings = await ElectionSettings.getSettings();
+  const formattedMessage = formatWhatsAppMessage({
+    pin: newPin,
+    clientUrl: env.CLIENT_URL || 'https://votelify.vercel.app',
+    electionTitle: settings.title,
+  });
+
+  await recordAuditLog({
+    adminId: req.admin._id,
+    action: AUDIT_ACTIONS.PIN_REGENERATED,
+    targetType: 'Voter',
+    targetId: id,
+    metadata: { phone: voter.phone },
+    req,
+  });
+
+  emitSocketEvent('VOTE_CAST', { pinRegenerated: true });
+
+  return sendSuccess(
+    res,
+    {
+      phone: voter.phone,
+      newPin,
+      message: formattedMessage,
+    },
+    `Un nouveau code PIN a été généré avec succès pour l'électeur ${voter.phone}.`
+  );
+};
+
