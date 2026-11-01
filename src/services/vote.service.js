@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
-import { Voter, Vote, Candidate, ElectionSettings, Admin } from '../models/index.js';
+import { Voter, Vote, Candidate, ElectionSettings, Election, Admin } from '../models/index.js';
 import { isVotingPeriodActive } from './election.service.js';
+
 import { verifyPin } from './pin.service.js';
 import { recordAuditLog } from './audit.service.js';
 import { CANDIDATE_STATUS, PIN_STATUS, AUDIT_ACTIONS, HTTP_STATUS } from '../config/constants.js';
@@ -276,25 +277,50 @@ export const resetTestData = async ({ adminPassword, admin, req }) => {
     );
   }
 
-  // 1. Réinitialisation des votes
+  // 1. Réinitialisation intégrale des votes
   await Vote.deleteMany({});
 
   // 2. Réinitialisation des statuts d'émargement des électeurs
   await Voter.updateMany({}, { $set: { hasVoted: false, votedAt: null } });
 
-  // 3. Masquage des résultats dans les paramètres
+  // 3. Remise à zéro intégrale de TOUTES les dates et périodes dans les paramètres (Singleton)
   const settings = await ElectionSettings.getSettings();
+  settings.candidatePeriodOpen = false;
+  settings.candidateStartAt = null;
+  settings.candidateEndAt = null;
+  settings.votingOpen = false;
+  settings.votingStartAt = null;
+  settings.votingEndAt = null;
   settings.resultsPublished = false;
+  settings.resultsPublishAt = null;
   await settings.save();
 
-  // 4. Enregistrement obligatoire dans le journal d'audit
+  // 4. Remise à zéro intégrale de TOUTES les dates et périodes sur l'ensemble des élections
+  await Election.updateMany(
+    {},
+    {
+      $set: {
+        candidatePeriodOpen: false,
+        candidateStartAt: null,
+        candidateEndAt: null,
+        votingOpen: false,
+        votingStartAt: null,
+        votingEndAt: null,
+        resultsPublished: false,
+        resultsPublishAt: null,
+      },
+    }
+  );
+
+  // 5. Enregistrement obligatoire dans le journal d'audit
   await recordAuditLog({
     adminId: admin._id,
     action: AUDIT_ACTIONS.TEST_DATA_RESET,
     targetType: 'Election',
-    metadata: { confirmedBy: admin.username },
+    metadata: { confirmedBy: admin.username, clearedDates: true },
     req,
   });
+
 
   return {
     success: true,
