@@ -60,7 +60,7 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
   // 4. Recherche de l'électeur correspondant : analyse exhaustive des électeurs actifs
   const potentialVoters = await Voter.find({
     pinStatus: PIN_STATUS.ACTIVE,
-  }).select('+pinHash phone hasVoted electionId');
+  }).select('+pinHash phone hasVoted votedElections electionId');
 
   let matchedVoter = null;
 
@@ -81,21 +81,21 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
     );
   }
 
-  // Contrôle d'isolation si l'électeur est formellement affecté à un autre scrutin
-  if (
-    candidate.electionId &&
-    matchedVoter.electionId &&
-    String(candidate.electionId) !== String(matchedVoter.electionId)
-  ) {
-    throw new AppError(
-      'Ce code PIN n’est pas valide pour ce scrutin électoral.',
-      HTTP_STATUS.FORBIDDEN,
-      'PIN_WRONG_ELECTION'
-    );
-  }
+  const targetElectionId = candidate.electionId ? String(candidate.electionId) : null;
 
-  // Si l'électeur a déjà voté
-  if (matchedVoter.hasVoted) {
+  // Contrôle d'émargement : un code PIN ne peut voter qu'une seule fois par élection
+  if (targetElectionId) {
+    const hasVotedThisElection = Array.isArray(matchedVoter.votedElections) &&
+      matchedVoter.votedElections.some((eId) => String(eId) === targetElectionId);
+
+    if (hasVotedThisElection) {
+      throw new AppError(
+        'Ce code PIN a déjà été utilisé pour ce scrutin. Chaque électeur ne dispose que d’un seul vote par élection.',
+        HTTP_STATUS.CONFLICT,
+        'PIN_ALREADY_USED'
+      );
+    }
+  } else if (matchedVoter.hasVoted) {
     throw new AppError(
       'Ce code PIN a déjà été utilisé pour voter. Chaque électeur ne dispose que d’un seul vote.',
       HTTP_STATUS.CONFLICT,
@@ -119,23 +119,32 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
   }
 
   try {
-    // Émargement atomique irréversible : échoue immédiatement si une requête concurrente a déjà modifié hasVoted
+    // Émargement atomique irréversible : verrouille contre les requêtes simultanées sur le même scrutin
     const atomicOptions = session ? { session, new: true } : { new: true };
-    const updatedVoter = await Voter.findOneAndUpdate(
-      { _id: matchedVoter._id, hasVoted: false },
-      {
-        $set: {
-          hasVoted: true,
-          votedAt: new Date(),
-          ...(candidate.electionId && !matchedVoter.electionId ? { electionId: candidate.electionId } : {}),
-        },
+    const atomicFilter = { _id: matchedVoter._id };
+    const atomicUpdate = {
+      $set: {
+        hasVoted: true,
+        votedAt: new Date(),
       },
+    };
+
+    if (targetElectionId) {
+      atomicFilter.votedElections = { $ne: targetElectionId };
+      atomicUpdate.$addToSet = { votedElections: targetElectionId };
+    } else {
+      atomicFilter.hasVoted = false;
+    }
+
+    const updatedVoter = await Voter.findOneAndUpdate(
+      atomicFilter,
+      atomicUpdate,
       atomicOptions
     );
 
     if (!updatedVoter) {
       throw new AppError(
-        'Ce code PIN a déjà été consommé lors d’une opération simultanée.',
+        'Ce code PIN a déjà été consommé pour ce scrutin lors d’une opération simultanée.',
         HTTP_STATUS.CONFLICT,
         'RACE_CONDITION_BLOCKED'
       );
@@ -197,10 +206,16 @@ export const calculateTally = async (electionId = null) => {
   }
 
   const totalVoters = await Voter.countDocuments(voterFilter);
-  const votedCount = await Voter.countDocuments({
-    ...voterFilter,
-    hasVoted: true,
-  });
+  const votedCountFilter = { pinStatus: PIN_STATUS.ACTIVE };
+  if (electionId) {
+    votedCountFilter.$or = [
+      { votedElections: electionId },
+      { electionId, hasVoted: true },
+    ];
+  } else {
+    votedCountFilter.hasVoted = true;
+  }
+  const votedCount = await Voter.countDocuments(votedCountFilter);
   const remainingCount = Math.max(0, totalVoters - votedCount);
   const participationRate = totalVoters > 0 ? Number(((votedCount / totalVoters) * 100).toFixed(2)) : 0;
 
@@ -339,12 +354,15 @@ export const resetTestData = async ({ adminPassword, admin, req, electionId = nu
   };
 
   if (electionId) {
+    await Candidate.deleteMany({ electionId });
     await Vote.deleteMany({ electionId });
+    await Voter.updateMany({}, { $pull: { votedElections: electionId } });
     await Voter.updateMany({ electionId }, { $set: { hasVoted: false, votedAt: null } });
     await Election.updateOne({ _id: electionId }, { $set: resetDates });
   } else {
+    await Candidate.deleteMany({});
     await Vote.deleteMany({});
-    await Voter.updateMany({}, { $set: { hasVoted: false, votedAt: null } });
+    await Voter.updateMany({}, { $set: { hasVoted: false, votedAt: null, votedElections: [] } });
     const settings = await ElectionSettings.getSettings();
     Object.assign(settings, resetDates);
     await settings.save();

@@ -1,4 +1,4 @@
-import { ElectionSettings, Election, Vote } from '../models/index.js';
+import { ElectionSettings, Election, Vote, Candidate, Voter, Position } from '../models/index.js';
 import { uploadElectionImage } from './cloudinary.service.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { HTTP_STATUS } from '../config/constants.js';
@@ -298,7 +298,7 @@ export const unpublishElectionResults = async (id) => {
  */
 export const deleteElection = async (id) => {
   const election = await Election.findById(id);
-  if (!election || !election.isActive) {
+  if (!election) {
     throw new AppError('Élection introuvable.', HTTP_STATUS.NOT_FOUND, 'ELECTION_NOT_FOUND');
   }
 
@@ -313,8 +313,17 @@ export const deleteElection = async (id) => {
     );
   }
 
-  election.isActive = false;
-  await election.save();
+  // 1. Suppression intégrale des candidatures et postes liés (libère immédiatement les numéros de téléphone)
+  await Candidate.deleteMany({ electionId: election._id });
+  await Position.deleteMany({ electionId: election._id });
+
+  // 2. Nettoyage des votes et de l'émargement des électeurs
+  await Vote.deleteMany({ electionId: election._id });
+  await Voter.updateMany({}, { $pull: { votedElections: election._id } });
+  await Voter.deleteMany({ electionId: election._id });
+
+  // 3. Suppression définitive de l'élection
+  await Election.findByIdAndDelete(id);
 
   return { id: election._id, title: election.title, deleted: true };
 };

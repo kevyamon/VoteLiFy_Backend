@@ -1,7 +1,12 @@
 import { Candidate, Position, Vote, Election } from '../models/index.js';
 import { getElectionSettings, isCandidacyPeriodActive } from '../services/election.service.js';
 import { normalizePhoneNumber } from '../services/voter.service.js';
-import { isValidVideoUrl, getApprovedCandidatesGroupedByPosition } from '../services/candidate.service.js';
+import {
+  isValidVideoUrl,
+  getApprovedCandidatesGroupedByPosition,
+  resolveCandidateEmailContext,
+  checkDuplicateCandidacy,
+} from '../services/candidate.service.js';
 import { uploadCandidatePhoto } from '../services/cloudinary.service.js';
 import { recordAuditLog } from '../services/audit.service.js';
 import { CANDIDATE_STATUS, AUDIT_ACTIONS, HTTP_STATUS } from '../config/constants.js';
@@ -31,24 +36,13 @@ export const getPublicCandidates = async (req, res) => {
  * Consultation publique de la fiche détaillée d'un candidat approuvé.
  */
 export const getPublicCandidateById = async (req, res) => {
-  const { id } = req.params;
-
-  const candidate = await Candidate.findOne({
-    _id: id,
-    status: CANDIDATE_STATUS.APPROVED,
-  })
+  const candidate = await Candidate.findOne({ _id: req.params.id, status: CANDIDATE_STATUS.APPROVED })
     .populate('positionId', 'name description order')
     .select('fullName positionId photoUrl pitch videoUrl createdAt')
     .lean();
 
   if (!candidate) {
-    return sendError(
-      res,
-      'Candidat introuvable ou non encore approuvé par la Commission Électorale.',
-      HTTP_STATUS.NOT_FOUND,
-      null,
-      'CANDIDATE_NOT_AVAILABLE'
-    );
+    return sendError(res, 'Candidat introuvable ou non approuvé.', HTTP_STATUS.NOT_FOUND, null, 'CANDIDATE_NOT_AVAILABLE');
   }
 
   return sendSuccess(res, candidate, 'Fiche du candidat récupérée.');
@@ -75,18 +69,9 @@ export const submitCandidacy = async (req, res) => {
 
   // 2. Détermination et résolution de l'élection cible
   const targetElectionId = electionId || position.electionId || null;
-  let election = null;
-
-  if (targetElectionId) {
-    election = await Election.findById(targetElectionId);
-  }
-  if (!election) {
-    // Si aucun identifiant direct, recherche du scrutin actif le plus récent
-    election = await Election.findOne({ isActive: true }).sort({ createdAt: -1 });
-  }
-  if (!election) {
-    election = await getElectionSettings();
-  }
+  const election = (targetElectionId && await Election.findById(targetElectionId))
+    || await Election.findOne({ isActive: true }).sort({ createdAt: -1 })
+    || await getElectionSettings();
 
   // 3. Contrôle de l'ouverture de la période de candidature pour ce scrutin
   if (!isCandidacyPeriodActive(election)) {
@@ -112,15 +97,16 @@ export const submitCandidacy = async (req, res) => {
   }
 
   // 5. Règle d'unicité : un membre ne peut soumettre qu'une seule candidature par scrutin
-  const duplicateQuery = { phone: normalizedPhone };
-  if (election?._id) {
-    duplicateQuery.electionId = election._id;
-  }
-  const existingCandidate = await Candidate.findOne(duplicateQuery);
-  if (existingCandidate) {
+  const targetId = election?._id || targetElectionId || null;
+  const duplicate = await checkDuplicateCandidacy({
+    phone: normalizedPhone,
+    electionId: targetId,
+  });
+
+  if (duplicate) {
     return sendError(
       res,
-      'Une candidature a déjà été enregistrée avec ce numéro WhatsApp pour ce scrutin. Il est formellement interdit de postuler à plusieurs postes simultanément.',
+      'Une candidature a déjà été enregistrée avec ce numéro WhatsApp pour ce scrutin.',
       HTTP_STATUS.CONFLICT,
       null,
       'CANDIDACY_ALREADY_EXISTS'
@@ -139,10 +125,9 @@ export const submitCandidacy = async (req, res) => {
   }
 
   // 6. Téléversement et optimisation Cloudinary de la photo officielle
-  let processedPhotoUrl = photoUrl.trim();
-  if (photoUrl && (photoUrl.startsWith('data:image/') || !photoUrl.includes('cloudinary.com'))) {
-    processedPhotoUrl = await uploadCandidatePhoto(photoUrl, fullName.trim());
-  }
+  const processedPhotoUrl = photoUrl && (photoUrl.startsWith('data:image/') || !photoUrl.includes('cloudinary.com'))
+    ? await uploadCandidatePhoto(photoUrl, fullName.trim())
+    : photoUrl.trim();
 
   // 7. Enregistrement en base de données avec statut PENDING
   const candidate = await Candidate.create({
@@ -201,22 +186,13 @@ export const submitCandidacy = async (req, res) => {
  * Récupération de l'ensemble des candidatures pour le back-office d'administration.
  */
 export const getAllCandidatesAdmin = async (req, res) => {
+  const { status, positionId, electionId, search } = req.query;
   const filter = {};
-
-  if (req.query.status) {
-    filter.status = req.query.status;
-  }
-
-  if (req.query.positionId) {
-    filter.positionId = req.query.positionId;
-  }
-
-  if (req.query.electionId) {
-    filter.electionId = req.query.electionId;
-  }
-
-  if (req.query.search) {
-    const searchRegex = { $regex: req.query.search.trim(), $options: 'i' };
+  if (status) filter.status = status;
+  if (positionId) filter.positionId = positionId;
+  if (electionId) filter.electionId = electionId;
+  if (search) {
+    const searchRegex = { $regex: search.trim(), $options: 'i' };
     filter.$or = [{ fullName: searchRegex }, { phone: searchRegex }];
   }
 
@@ -233,17 +209,12 @@ export const getAllCandidatesAdmin = async (req, res) => {
  * Consultation détaillée d'un candidat pour la modération.
  */
 export const getCandidateByIdAdmin = async (req, res) => {
-  const { id } = req.params;
-
-  const candidate = await Candidate.findById(id)
+  const candidate = await Candidate.findById(req.params.id)
     .populate('positionId', 'name description')
     .populate('reviewedBy', 'username')
     .lean();
 
-  if (!candidate) {
-    return sendError(res, 'Candidat introuvable.', HTTP_STATUS.NOT_FOUND, null, 'CANDIDATE_NOT_FOUND');
-  }
-
+  if (!candidate) return sendError(res, 'Candidat introuvable.', HTTP_STATUS.NOT_FOUND, null, 'CANDIDATE_NOT_FOUND');
   return sendSuccess(res, candidate, 'Dossier de candidature récupéré.');
 };
 
@@ -251,17 +222,15 @@ export const getCandidateByIdAdmin = async (req, res) => {
  * Validation officielle d'une candidature par la Commission Électorale.
  */
 export const approveCandidate = async (req, res) => {
-  const { id } = req.params;
+  const candidate = await Candidate.findById(req.params.id);
+  if (!candidate) return sendError(res, 'Candidat introuvable.', HTTP_STATUS.NOT_FOUND, null, 'CANDIDATE_NOT_FOUND');
 
-  const candidate = await Candidate.findById(id);
-  if (!candidate) {
-    return sendError(res, 'Candidat introuvable.', HTTP_STATUS.NOT_FOUND, null, 'CANDIDATE_NOT_FOUND');
-  }
-
-  candidate.status = CANDIDATE_STATUS.APPROVED;
-  candidate.reviewedAt = new Date();
-  candidate.reviewedBy = req.admin._id;
-  candidate.reviewNotes = req.body.reviewNotes || '';
+  Object.assign(candidate, {
+    status: CANDIDATE_STATUS.APPROVED,
+    reviewedAt: new Date(),
+    reviewedBy: req.admin._id,
+    reviewNotes: req.body.reviewNotes || '',
+  });
   await candidate.save();
 
   await recordAuditLog({
@@ -275,52 +244,29 @@ export const approveCandidate = async (req, res) => {
 
   emitSocketEvent('CANDIDATE_UPDATED', candidate);
 
-  // Notification par email de la validation officielle de candidature (Brevo)
-  (async () => {
-    try {
-      let electionTitle = 'Scrutin officiel';
-      if (candidate.electionId) {
-        const el = await Election.findById(candidate.electionId);
-        if (el) electionTitle = el.title;
-      } else {
-        const settings = await getElectionSettings();
-        if (settings) electionTitle = settings.title;
-      }
+  // Notification asynchrone par email de la validation de candidature (Brevo)
+  resolveCandidateEmailContext(candidate).then(({ electionTitle, positionName }) => {
+    sendCandidacyApprovedEmail({ candidate, electionTitle, positionName }).catch((err) => {
+      console.error('[EmailService] Erreur notification approbation candidature :', err.message);
+    });
+  }).catch(() => {});
 
-      const position = await Position.findById(candidate.positionId);
-      await sendCandidacyApprovedEmail({
-        candidate,
-        electionTitle,
-        positionName: position?.name || 'Poste électoral',
-      });
-    } catch (emailErr) {
-      console.error('[EmailService] Erreur notification approbation candidature :', emailErr.message);
-    }
-  })();
-
-  return sendSuccess(
-    res,
-    candidate,
-    `La candidature de « ${candidate.fullName} » a été approuvée et est désormais visible au public.`
-  );
+  return sendSuccess(res, candidate, `La candidature de « ${candidate.fullName} » a été approuvée et est désormais visible au public.`);
 };
 
 /**
  * Rejet d'une candidature non conforme.
  */
 export const rejectCandidate = async (req, res) => {
-  const { id } = req.params;
-  const { reviewNotes } = req.body;
+  const candidate = await Candidate.findById(req.params.id);
+  if (!candidate) return sendError(res, 'Candidat introuvable.', HTTP_STATUS.NOT_FOUND, null, 'CANDIDATE_NOT_FOUND');
 
-  const candidate = await Candidate.findById(id);
-  if (!candidate) {
-    return sendError(res, 'Candidat introuvable.', HTTP_STATUS.NOT_FOUND, null, 'CANDIDATE_NOT_FOUND');
-  }
-
-  candidate.status = CANDIDATE_STATUS.REJECTED;
-  candidate.reviewedAt = new Date();
-  candidate.reviewedBy = req.admin._id;
-  candidate.reviewNotes = reviewNotes || 'Candidature non conforme aux critères d’éligibilité.';
+  Object.assign(candidate, {
+    status: CANDIDATE_STATUS.REJECTED,
+    reviewedAt: new Date(),
+    reviewedBy: req.admin._id,
+    reviewNotes: req.body.reviewNotes || 'Candidature non conforme aux critères d’éligibilité.',
+  });
   await candidate.save();
 
   await recordAuditLog({
@@ -328,44 +274,25 @@ export const rejectCandidate = async (req, res) => {
     action: AUDIT_ACTIONS.CANDIDACY_REJECTED,
     targetType: 'Candidate',
     targetId: String(candidate._id),
-    metadata: {
-      fullName: candidate.fullName,
-      reviewNotes: candidate.reviewNotes,
-    },
+    metadata: { fullName: candidate.fullName, reviewNotes: candidate.reviewNotes },
     req,
   });
 
   emitSocketEvent('CANDIDATE_UPDATED', candidate);
 
-  // Notification par email du rejet de la candidature avec observation (Brevo)
-  (async () => {
-    try {
-      let electionTitle = 'Scrutin officiel';
-      if (candidate.electionId) {
-        const el = await Election.findById(candidate.electionId);
-        if (el) electionTitle = el.title;
-      } else {
-        const settings = await getElectionSettings();
-        if (settings) electionTitle = settings.title;
-      }
+  // Notification asynchrone par email du rejet de la candidature (Brevo)
+  resolveCandidateEmailContext(candidate).then(({ electionTitle, positionName }) => {
+    sendCandidacyRejectedEmail({
+      candidate,
+      electionTitle,
+      positionName,
+      reason: candidate.reviewNotes,
+    }).catch((err) => {
+      console.error('[EmailService] Erreur notification rejet candidature :', err.message);
+    });
+  }).catch(() => {});
 
-      const position = await Position.findById(candidate.positionId);
-      await sendCandidacyRejectedEmail({
-        candidate,
-        electionTitle,
-        positionName: position?.name || 'Poste électoral',
-        reason: candidate.reviewNotes,
-      });
-    } catch (emailErr) {
-      console.error('[EmailService] Erreur notification rejet candidature :', emailErr.message);
-    }
-  })();
-
-  return sendSuccess(
-    res,
-    candidate,
-    `La candidature de « ${candidate.fullName} » a été rejetée.`
-  );
+  return sendSuccess(res, candidate, `La candidature de « ${candidate.fullName} » a été rejetée.`);
 };
 
 /**

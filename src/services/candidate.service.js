@@ -1,4 +1,5 @@
-import { Candidate, Position } from '../models/index.js';
+import { Candidate, Position, Election } from '../models/index.js';
+import { getElectionSettings } from './election.service.js';
 import { CANDIDATE_STATUS } from '../config/constants.js';
 
 /**
@@ -75,5 +76,53 @@ export const getApprovedCandidatesGroupedByPosition = async (electionId = null) 
       (c) => String(c.positionId) === String(pos._id)
     ),
   }));
+};
+
+/**
+ * Résout le contexte électoral et le nom du poste pour les notifications Brevo.
+ * 
+ * @param {Object} candidate
+ * @returns {Promise<{ electionTitle: string, positionName: string }>}
+ */
+export const resolveCandidateEmailContext = async (candidate) => {
+  let electionTitle = 'Scrutin officiel';
+  if (candidate.electionId) {
+    const el = await Election.findById(candidate.electionId);
+    if (el) electionTitle = el.title;
+  } else {
+    const settings = await getElectionSettings();
+    if (settings) electionTitle = settings.title;
+  }
+  const position = await Position.findById(candidate.positionId);
+  return { electionTitle, positionName: position?.name || 'Poste électoral' };
+};
+
+/**
+ * Vérifie l'unicité de la candidature par scrutin et nettoie les orphelins éventuels.
+ * 
+ * @param {Object} params
+ * @param {string} params.phone
+ * @param {string|null} [params.electionId]
+ * @returns {Promise<Object|null>}
+ */
+export const checkDuplicateCandidacy = async ({ phone, electionId = null }) => {
+  const duplicateQuery = { phone };
+  if (electionId) {
+    duplicateQuery.electionId = electionId;
+  }
+
+  const existing = await Candidate.findOne(duplicateQuery);
+  if (!existing) return null;
+
+  if (existing.electionId) {
+    const parentElection = await Election.findById(existing.electionId);
+    if (!parentElection) {
+      // Élection parente supprimée : purge automatique de l'orphelin
+      await Candidate.deleteMany({ electionId: existing.electionId });
+      return null;
+    }
+  }
+
+  return existing;
 };
 

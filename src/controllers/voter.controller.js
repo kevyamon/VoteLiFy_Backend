@@ -97,9 +97,19 @@ export const getVotersController = async (req, res) => {
     ];
   }
 
+  // Filtrage par statut de vote
+  if (req.query.hasVoted !== undefined) {
+    const isVoted = req.query.hasVoted === 'true';
+    if (req.query.electionId) {
+      filter.votedElections = isVoted ? req.query.electionId : { $ne: req.query.electionId };
+    } else {
+      filter.hasVoted = isVoted;
+    }
+  }
+
   const [voters, total] = await Promise.all([
     Voter.find(filter)
-      .select('phone hasVoted pinStatus votedAt createdAt')
+      .select('phone hasVoted votedElections pinStatus votedAt createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -107,10 +117,18 @@ export const getVotersController = async (req, res) => {
     Voter.countDocuments(filter),
   ]);
 
+  const electionIdStr = req.query.electionId ? String(req.query.electionId) : null;
+  const formattedVoters = voters.map((v) => ({
+    ...v,
+    hasVoted: electionIdStr
+      ? Boolean(Array.isArray(v.votedElections) && v.votedElections.some((id) => String(id) === electionIdStr))
+      : Boolean(v.hasVoted),
+  }));
+
   return sendSuccess(
     res,
     {
-      voters,
+      voters: formattedVoters,
       pagination: {
         page,
         limit,
@@ -128,20 +146,30 @@ export const getVotersController = async (req, res) => {
 export const exportVotersController = async (req, res) => {
   const exportFilter = {};
   if (req.query.electionId) {
-    exportFilter.electionId = req.query.electionId;
+    exportFilter.$or = [
+      { electionId: req.query.electionId },
+      { electionId: null },
+      { electionId: { $exists: false } },
+    ];
   }
 
   const voters = await Voter.find(exportFilter)
-    .select('phone hasVoted pinStatus votedAt createdAt')
+    .select('phone hasVoted votedElections pinStatus votedAt createdAt')
     .sort({ createdAt: -1 })
     .lean();
 
-  const exportData = voters.map((v) => ({
-    telephone: v.phone,
-    statutVote: v.hasVoted ? 'A VOTÉ' : "N'A PAS ENCORE VOTÉ",
-    dateVote: v.votedAt ? v.votedAt.toISOString() : 'N/A',
-    dateImport: v.createdAt ? v.createdAt.toISOString() : 'N/A',
-  }));
+  const electionIdStr = req.query.electionId ? String(req.query.electionId) : null;
+  const exportData = voters.map((v) => {
+    const hasVoted = electionIdStr
+      ? Boolean(Array.isArray(v.votedElections) && v.votedElections.some((id) => String(id) === electionIdStr))
+      : Boolean(v.hasVoted);
+    return {
+      telephone: v.phone,
+      statutVote: hasVoted ? 'A VOTÉ' : "N'A PAS ENCORE VOTÉ",
+      dateVote: v.votedAt ? v.votedAt.toISOString() : 'N/A',
+      dateImport: v.createdAt ? v.createdAt.toISOString() : 'N/A',
+    };
+  });
 
   return sendSuccess(res, exportData, 'Données d’export confidentiel prêtes.');
 };

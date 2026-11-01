@@ -26,6 +26,13 @@ const voterSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    votedElections: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Election',
+        default: [],
+      },
+    ],
     pinStatus: {
       type: String,
       enum: Object.values(PIN_STATUS),
