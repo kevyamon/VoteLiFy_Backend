@@ -88,9 +88,13 @@ export const getVotersController = async (req, res) => {
     filter.hasVoted = req.query.hasVoted === 'true';
   }
 
-  // Filtrage par élection
+  // Filtrage par élection (inclut également les électeurs non encore cloisonnés)
   if (req.query.electionId) {
-    filter.electionId = req.query.electionId;
+    filter.$or = [
+      { electionId: req.query.electionId },
+      { electionId: null },
+      { electionId: { $exists: false } },
+    ];
   }
 
   const [voters, total] = await Promise.all([

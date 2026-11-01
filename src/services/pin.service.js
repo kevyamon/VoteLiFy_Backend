@@ -28,7 +28,7 @@ export const generateSinglePin = () => {
  * @returns {Promise<string>}
  */
 export const hashPin = async (rawPin) => {
-  const normalizedPin = String(rawPin).trim().toUpperCase();
+  const normalizedPin = String(rawPin).trim().toUpperCase().replace(/\s+/g, '');
   return bcrypt.hash(normalizedPin, SECURITY_CONFIG.BCRYPT_SALT_ROUNDS);
 };
 
@@ -40,7 +40,7 @@ export const hashPin = async (rawPin) => {
  * @returns {Promise<boolean>}
  */
 export const verifyPin = async (rawPin, storedHash) => {
-  const normalizedPin = String(rawPin).trim().toUpperCase();
+  const normalizedPin = String(rawPin).trim().toUpperCase().replace(/\s+/g, '');
   return bcrypt.compare(normalizedPin, storedHash);
 };
 

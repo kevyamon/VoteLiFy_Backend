@@ -57,13 +57,10 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
   // 3. Normalisation du PIN
   const normalizedPin = String(rawPin).trim().toUpperCase().replace(/\s+/g, '');
 
-  // 4. Recherche de l'électeur correspondant parmi les électeurs autorisés du scrutin
-  const voterQuery = { pinStatus: PIN_STATUS.ACTIVE };
-  if (candidate.electionId) {
-    voterQuery.electionId = candidate.electionId;
-  }
-
-  const potentialVoters = await Voter.find(voterQuery).select('+pinHash');
+  // 4. Recherche de l'électeur correspondant : analyse exhaustive des électeurs actifs
+  const potentialVoters = await Voter.find({
+    pinStatus: PIN_STATUS.ACTIVE,
+  }).select('+pinHash phone hasVoted electionId');
 
   let matchedVoter = null;
 
@@ -81,6 +78,19 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
       'Le code PIN saisi est incorrect. Vérifiez votre code personnel et réessayez.',
       HTTP_STATUS.UNAUTHORIZED,
       'INVALID_PIN'
+    );
+  }
+
+  // Contrôle d'isolation si l'électeur est formellement affecté à un autre scrutin
+  if (
+    candidate.electionId &&
+    matchedVoter.electionId &&
+    String(candidate.electionId) !== String(matchedVoter.electionId)
+  ) {
+    throw new AppError(
+      'Ce code PIN n’est pas valide pour ce scrutin électoral.',
+      HTTP_STATUS.FORBIDDEN,
+      'PIN_WRONG_ELECTION'
     );
   }
 
@@ -113,7 +123,13 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
     const atomicOptions = session ? { session, new: true } : { new: true };
     const updatedVoter = await Voter.findOneAndUpdate(
       { _id: matchedVoter._id, hasVoted: false },
-      { $set: { hasVoted: true, votedAt: new Date() } },
+      {
+        $set: {
+          hasVoted: true,
+          votedAt: new Date(),
+          ...(candidate.electionId && !matchedVoter.electionId ? { electionId: candidate.electionId } : {}),
+        },
+      },
       atomicOptions
     );
 
@@ -172,7 +188,13 @@ export const submitBallot = async ({ candidateId, rawPin }) => {
 export const calculateTally = async (electionId = null) => {
   // 1. Métriques de participation globale
   const voterFilter = { pinStatus: PIN_STATUS.ACTIVE };
-  if (electionId) voterFilter.electionId = electionId;
+  if (electionId) {
+    voterFilter.$or = [
+      { electionId },
+      { electionId: null },
+      { electionId: { $exists: false } },
+    ];
+  }
 
   const totalVoters = await Voter.countDocuments(voterFilter);
   const votedCount = await Voter.countDocuments({
@@ -305,64 +327,28 @@ export const resetTestData = async ({ adminPassword, admin, req, electionId = nu
     );
   }
 
+  const resetDates = {
+    candidatePeriodOpen: false,
+    candidateStartAt: null,
+    candidateEndAt: null,
+    votingOpen: false,
+    votingStartAt: null,
+    votingEndAt: null,
+    resultsPublished: false,
+    resultsPublishAt: null,
+  };
+
   if (electionId) {
-    // 1. Réinitialisation des votes du scrutin ciblé
     await Vote.deleteMany({ electionId });
-
-    // 2. Réinitialisation des émargements des électeurs de ce scrutin
     await Voter.updateMany({ electionId }, { $set: { hasVoted: false, votedAt: null } });
-
-    // 3. Remise à zéro des dates et périodes de cette élection
-    await Election.updateOne(
-      { _id: electionId },
-      {
-        $set: {
-          candidatePeriodOpen: false,
-          candidateStartAt: null,
-          candidateEndAt: null,
-          votingOpen: false,
-          votingStartAt: null,
-          votingEndAt: null,
-          resultsPublished: false,
-          resultsPublishAt: null,
-        },
-      }
-    );
+    await Election.updateOne({ _id: electionId }, { $set: resetDates });
   } else {
-    // 1. Réinitialisation intégrale de tous les votes
     await Vote.deleteMany({});
-
-    // 2. Réinitialisation de tous les statuts d'émargement
     await Voter.updateMany({}, { $set: { hasVoted: false, votedAt: null } });
-
-    // 3. Remise à zéro intégrale de TOUTES les dates et périodes dans les paramètres
     const settings = await ElectionSettings.getSettings();
-    settings.candidatePeriodOpen = false;
-    settings.candidateStartAt = null;
-    settings.candidateEndAt = null;
-    settings.votingOpen = false;
-    settings.votingStartAt = null;
-    settings.votingEndAt = null;
-    settings.resultsPublished = false;
-    settings.resultsPublishAt = null;
+    Object.assign(settings, resetDates);
     await settings.save();
-
-    // 4. Remise à zéro intégrale de toutes les élections
-    await Election.updateMany(
-      {},
-      {
-        $set: {
-          candidatePeriodOpen: false,
-          candidateStartAt: null,
-          candidateEndAt: null,
-          votingOpen: false,
-          votingStartAt: null,
-          votingEndAt: null,
-          resultsPublished: false,
-          resultsPublishAt: null,
-        },
-      }
-    );
+    await Election.updateMany({}, { $set: resetDates });
   }
 
   // 5. Enregistrement obligatoire dans le journal d'audit
