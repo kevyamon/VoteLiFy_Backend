@@ -24,6 +24,7 @@ const app = express();
 // 1. En-têtes de sécurité et CORS
 app.use(helmetMiddleware);
 app.use(corsMiddleware);
+app.options('*', corsMiddleware);
 
 // 2. Journalisation en développement
 if (env.NODE_ENV !== 'test') {

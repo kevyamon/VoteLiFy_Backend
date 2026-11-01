@@ -9,31 +9,36 @@ import { HTTP_STATUS } from '../config/constants.js';
  */
 export const corsMiddleware = cors({
   origin: (origin, callback) => {
-    // Autoriser les requêtes sans origine (ex: curl, applications mobiles ou requêtes serveur à serveur)
+    // Autoriser les requêtes sans origine (ex: curl, Postman ou requêtes serveur à serveur)
     if (!origin) return callback(null, true);
 
-    const clientUrlClean = (env.CLIENT_URL || '').replace(/\/+$/, '');
+    const clientUrlClean = (env.CLIENT_URL || '').trim().replace(/\/+$/, '');
 
-    // Autoriser CLIENT_URL configuré, domaines Vercel officiels ou localhost en dev
+    // 1. Autoriser localhost et adresses réseau local pour le développement et les tests mobiles
     if (
-      origin === clientUrlClean ||
-      origin.endsWith('.vercel.app') ||
-      origin === 'https://votelify.vercel.app'
+      /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+      /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) ||
+      /^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)
     ) {
       return callback(null, true);
     }
 
-    if (env.NODE_ENV === 'development') {
-      if (/^http:\/\/localhost:\d+$/.test(origin) || /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) {
-        return callback(null, true);
-      }
+    // 2. Autoriser CLIENT_URL configuré
+    if (clientUrlClean && origin === clientUrlClean) {
+      return callback(null, true);
     }
 
-    return callback(new Error(`Origine ${origin} non autorisée par la politique CORS.`));
+    // 3. Autoriser les domaines et déploiements Vercel
+    if (origin.endsWith('.vercel.app') || origin === 'https://votelify.vercel.app') {
+      return callback(null, true);
+    }
+
+    // Rejeter proprement sans déclencher de crash serveur 500
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Cache-Control'],
 });
 
 /**
